@@ -13,7 +13,7 @@
      templates = stage1(tmpdir, sourcepath)
  
 +    # Apply 'perf' patch
-+    os.system("pwd; ls -la eb_stage1/lib/python2.7/site-packages; cd %s/lib/python%s/site-packages/easybuild_framework-2.5.0/py%s.egg/easybuild/tools; pwd; patch -p3 < %s/easybuild-framework-2.5.0-use_perf.patch; cd -; pwd" % (tmpdir, PYTHON_VERSION, PYTHON_VERSION, sourcepath))
++    os.system("cd %s/lib/python%s/site-packages/easybuild_framework-2.5.0-py%s.egg/easybuild/tools; patch -p3 < %s/easybuild-framework-2.5.0-use_perf.patch" % (tmpdir, PYTHON_VERSION, PYTHON_VERSION, sourcepath))
 +
      # STAGE 2: install EasyBuild using EasyBuild (to final target installation dir)
      stage2(tmpdir, templates, install_path, distribute_egg_dir, sourcepath)
