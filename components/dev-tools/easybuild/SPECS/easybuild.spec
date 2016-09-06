@@ -32,7 +32,8 @@ Source3:   https://pypi.python.org/packages/source/v/vsc-base/vsc-base-%{vsc_bas
 Source4:   bootstrap_eb.py
 Source5:   easybuild-sles12.patch
 Source6:   OHPC_macros
-Patch2:    easybuild-framework-%{version}-use_perf.patch
+Source7:   easybuild-framework-%{version}-use_perf.patch
+Patch4:    bootstrap_eb.py-apply-%{version}.patch
 BuildRoot: %{_tmppath}/%{name}-%{version}-%{release}-root
 BuildRequires: patch
 BuildRequires: python
@@ -60,7 +61,7 @@ systems in an efficient way.
 
 %prep
 mkdir %{buildroot}
-%patch2 -p1
+%patch4 -p0
 
 %build
 
