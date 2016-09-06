@@ -32,11 +32,14 @@ Source3:   https://pypi.python.org/packages/source/v/vsc-base/vsc-base-%{vsc_bas
 Source4:   bootstrap_eb.py
 Source5:   easybuild-sles12.patch
 Source6:   OHPC_macros
+Patch2:    easybuild-framework-%{version}-use_perf.patch
 BuildRoot: %{_tmppath}/%{name}-%{version}-%{release}-root
 BuildRequires: patch
 BuildRequires: python
 BuildRequires: python-setuptools
+BuildRequires: perf
 Requires: python
+Requires: perf
 #!BuildIgnore: post-build-checks
 
 # Lmod dependency (note that lmod is pre-populated in the OpenHPC OBS build
@@ -57,6 +60,7 @@ systems in an efficient way.
 
 %prep
 mkdir %{buildroot}
+%patch2 -p1
 
 %build
 
