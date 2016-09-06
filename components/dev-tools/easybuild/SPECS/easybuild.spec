@@ -61,12 +61,12 @@ systems in an efficient way.
 
 %prep
 mkdir %{buildroot}
-%patch4 -p0
 
 %build
 
 cd %{buildroot}
 cp %{_sourcedir}/*py .
+%patch4 -p0
 
 export EASYBUILD_BOOTSTRAP_SKIP_STAGE0=1
 export EASYBUILD_BOOTSTRAP_SOURCEPATH=%{_sourcedir}
