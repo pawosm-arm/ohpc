@@ -1,6 +1,6 @@
 diff -ruN easybuild-framework-2.5.0.old/easybuild/tools/systemtools.py easybuild-framework-2.5.0/easybuild/tools/systemtools.py
 --- easybuild-framework-2.5.0.old/easybuild/tools/systemtools.py	2015-12-17 13:31:43.000000000 +0000
-+++ easybuild-framework-2.5.0/easybuild/tools/systemtools.py	2016-09-06 11:45:58.123354544 +0100
++++ easybuild-framework-2.5.0/easybuild/tools/systemtools.py	2016-09-06 22:26:59.084165139 +0100
 @@ -37,6 +37,7 @@
  import struct
  import sys
@@ -9,21 +9,22 @@ diff -ruN easybuild-framework-2.5.0.old/easybuild/tools/systemtools.py easybuild
  from socket import gethostname
  from vsc.utils import fancylogger
  from vsc.utils.affinity import sched_getaffinity
-@@ -229,7 +230,16 @@
-                 cpu_freq = float(res.group('cpu_freq'))
-                 _log.debug("Found CPU frequency using regex '%s': %s" % (cpu_freq_regex.pattern, cpu_freq))
-             else:
--                _log.debug("Failed to determine CPU frequency from %s", PROC_CPUINFO_FP)
-+                perf_out = check_output('LC_ALL=C perf stat -e cycles,task-clock sleep 1 2>&1', shell=True)
-+                int_pat = r'\d+'
-+                float_pat = r'\d+\.\d*'
-+                space_tab_pat = r'\s+'
-+                cycles = re.findall(int_pat + r'(?='+ space_tab_pat + r'cycles)', perf_out)
-+                task_clock = re.findall(float_pat + r'(?=' + space_tab_pat + 'task-clock' + space_tab_pat + r'\(msec\))', perf_out)
-+                if (len(cycles) != 1) or (len(task_clock) != 1):
-+                    _log.debug("Failed to determine CPU frequency using perf: no essential data in perf output")
-+                else:
-+                    cpu_freq = float(cycles[0]) / (float(task_clock[0]) * 1000)
+@@ -233,6 +234,18 @@
          else:
              _log.debug("%s not found to determine max. CPU clock frequency without CPU scaling: %s" % PROC_CPUINFO_FP)
  
++        if cpu_freq is None:
++            perf_out = check_output('LC_ALL=C perf stat -e cycles,task-clock sleep 1 2>&1', shell=True)
++            int_pat = r'\d+'
++            float_pat = r'\d+\.\d*'
++            space_tab_pat = r'\s+'
++            cycles = re.findall(int_pat + r'(?='+ space_tab_pat + r'cycles)', perf_out)
++            task_clock = re.findall(float_pat + r'(?=' + space_tab_pat + 'task-clock' + space_tab_pat + r'\(msec\))', perf_out)
++            if (len(cycles) != 1) or (len(task_clock) != 1):
++                _log.debug("Failed to determine CPU frequency using perf: no essential data in perf output")
++            else:
++                cpu_freq = float(cycles[0]) / (float(task_clock[0]) * 1000)
++
+     elif os_type == DARWIN:
+         cmd = "sysctl -n hw.cpufrequency_max"
+         _log.debug("Trying to determine CPU frequency on Darwin via cmd '%s'" % cmd)
