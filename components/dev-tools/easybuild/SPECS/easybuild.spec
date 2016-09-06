@@ -33,7 +33,7 @@ Source4:   bootstrap_eb.py
 Source5:   easybuild-sles12.patch
 Source6:   OHPC_macros
 Source7:   easybuild-framework-%{version}-use_perf.patch
-Patch4:    bootstrap_eb.py-apply-%{version}.patch
+Source8:   bootstrap_eb.py-apply-%{version}.patch
 BuildRoot: %{_tmppath}/%{name}-%{version}-%{release}-root
 BuildRequires: patch
 BuildRequires: python
@@ -66,7 +66,7 @@ mkdir %{buildroot}
 
 cd %{buildroot}
 cp %{_sourcedir}/*py .
-%patch4 -p0
+patch -p0 < %{_sourcedir}/bootstrap_eb.py-apply-%{version}.patch
 
 export EASYBUILD_BOOTSTRAP_SKIP_STAGE0=1
 export EASYBUILD_BOOTSTRAP_SOURCEPATH=%{_sourcedir}
