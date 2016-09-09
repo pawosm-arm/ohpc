@@ -1,7 +1,6 @@
-diff --git a/packages/kokkos/core/src/Kokkos_Macros.hpp b/packages/kokkos/core/src/Kokkos_Macros.hpp
-index c221c2f..de04ef0 100644
---- a/packages/kokkos/core/src/Kokkos_Macros.hpp
-+++ b/packages/kokkos/core/src/Kokkos_Macros.hpp
+diff -ruN Trilinos-trilinos-release-12-4-2.old/packages/kokkos/core/src/Kokkos_Macros.hpp Trilinos-trilinos-release-12-4-2/packages/kokkos/core/src/Kokkos_Macros.hpp
+--- Trilinos-trilinos-release-12-4-2.old/packages/kokkos/core/src/Kokkos_Macros.hpp	2015-11-12 15:57:46.000000000 +0000
++++ Trilinos-trilinos-release-12-4-2/packages/kokkos/core/src/Kokkos_Macros.hpp	2016-09-09 23:46:32.342977179 +0100
 @@ -253,7 +253,7 @@
      #endif
    #endif
@@ -9,7 +8,7 @@ index c221c2f..de04ef0 100644
 -    #define KOKKOS_ENABLE_ASM 1
 +    #define KOKKOS_ENABLE_ASM 0
    #endif
-
+ 
    #if ( 1200 <= KOKKOS_COMPILER_INTEL ) && ! defined( KOKKOS_FORCEINLINE_FUNCTION )
 @@ -330,8 +330,11 @@
            defined(__POWERPC__) || \
@@ -23,30 +22,29 @@ index c221c2f..de04ef0 100644
 +          )
 +    #define KOKKOS_ENABLE_ASM 0
    #endif
-
+ 
  #endif
-diff --git a/packages/kokkos/core/src/impl/Kokkos_spinwait.cpp b/packages/kokkos/core/src/impl/Kokkos_spinwait.cpp
-index abd845d..6ce7091 100644
---- a/packages/kokkos/core/src/impl/Kokkos_spinwait.cpp
-+++ b/packages/kokkos/core/src/impl/Kokkos_spinwait.cpp
+diff -ruN Trilinos-trilinos-release-12-4-2.old/packages/kokkos/core/src/impl/Kokkos_spinwait.cpp Trilinos-trilinos-release-12-4-2/packages/kokkos/core/src/impl/Kokkos_spinwait.cpp
+--- Trilinos-trilinos-release-12-4-2.old/packages/kokkos/core/src/impl/Kokkos_spinwait.cpp	2015-11-12 15:57:46.000000000 +0000
++++ Trilinos-trilinos-release-12-4-2/packages/kokkos/core/src/impl/Kokkos_spinwait.cpp	2016-09-09 23:46:32.342977179 +0100
 @@ -46,6 +46,7 @@
-
+ 
  /*--------------------------------------------------------------------------*/
-
+ 
 +#ifdef CEG
  #if ( KOKKOS_ENABLE_ASM )
-   #if defined( __arm__ )
+   #if defined( __arm__ ) || defined( __aarch64__ )
      /* No-operation instruction to idle the thread. */
-@@ -64,6 +65,12 @@
+@@ -62,6 +63,12 @@
+ #else
+   #include <sched.h>
    #define YIELD  sched_yield()
- #endif
-
++#endif
++
 +/* CEG bit */
 +#else
 +  #include <sched.h>
 +  #define YIELD  sched_yield()
-+#endif
-+
+ #endif
+ 
  /*--------------------------------------------------------------------------*/
-
- namespace Kokkos {
