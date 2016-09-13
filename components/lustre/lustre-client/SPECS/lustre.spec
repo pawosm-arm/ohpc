@@ -47,7 +47,6 @@ BuildRequires: kernel-devel = 2.6.32-431.el6
 BuildRequires: kernel = %{centos_kernel}
 BuildRequires: kernel-devel = %{centos_kernel}
 %define kdir /usr/src/kernels/%{centos_kernel}.%(uname -m)
-%define kobjdir %{kdir}
 
 %endif
 
@@ -438,7 +437,7 @@ CONFIGURE_ARGS=$(echo $CONFIGURE_ARGS | sed -e 's/"\?--with-kmp-moddir=[^ ][^ ]*
 # string in it which we don't want word splitted by the shell
 # also remove (build|host|target) options because they will be specified
 # inside $CONFIGURE_ARGS
-%define eval_configure %(echo '%configure' | sed -e 's#\./configure#eval ./configure#' -e 's/--\\(build\\|host\\|target\\)=[^ ][^ ]* //g') || true
+%define eval_configure %(echo '%configure' | sed -e 's#\./configure#eval ./configure#' -e 's/--\\(build\\|host\\|target\\)=[^ ][^ ]* //g')
 
 %eval_configure \
 	%{?kdir: --with-linux=%kdir} %{?kobjdir: --with-linux-obj=%kobjdir} \
@@ -849,7 +848,7 @@ if [ -x %{rpm_post_base}-osd-ldiskfs.sh ]; then
 fi
 %else
 OSD_LDISKFS_RPM_NAME=$(rpm -q %{name}-osd-ldiskfs | grep "%{version}-%{release}")
-rpm -ql $OSD_LDISKFS_RPM_NAME | grep '\.ko$' > /var/run/%{name}-osd-ldiskfs
+rpm -ql $OSD_LDISKFS_RPM_NAME | grep '\.ko$' > /var/run/%{name}-osd-ldiskfs || true
 %endif
 %if %{with lustre_utils} && %{defined rpm_post_base}
 %preun osd-ldiskfs-mount
