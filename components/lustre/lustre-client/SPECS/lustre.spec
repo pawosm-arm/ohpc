@@ -46,8 +46,7 @@ BuildRequires: kernel-devel = 2.6.32-431.el6
 %define centos_kernel 4.2.0-0.21.el7
 BuildRequires: kernel = %{centos_kernel}
 BuildRequires: kernel-devel = %{centos_kernel}
-%define kdir /lib/modules/%{centos_kernel}.%(uname -m)/source/
-%define kobjdir /lib/modules/%{centos_kernel}.%(uname -m)/build/
+%define kdir /usr/src/kernels/%{centos_kernel}.%(uname -m)
 
 %endif
 
