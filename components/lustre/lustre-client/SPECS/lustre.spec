@@ -438,6 +438,9 @@ CONFIGURE_ARGS=$(echo $CONFIGURE_ARGS | sed -e 's/"\?--with-kmp-moddir=[^ ][^ ]*
 # string in it which we don't want word splitted by the shell
 # also remove (build|host|target) options because they will be specified
 # inside $CONFIGURE_ARGS
+
+CONFIGURE_ARGS="$CONFIGURE_ARGS LD=$CC"
+
 %define eval_configure %(echo '%configure' | sed -e 's#\./configure#eval ./configure#' -e 's/--\\(build\\|host\\|target\\)=[^ ][^ ]* //g')
 
 %eval_configure \
@@ -447,6 +450,7 @@ pwd
 ls -la
 cat config.log
 uname -a
+echo LD = $LD CC = $CC
 make %{?_smp_mflags} -s %{?make_args}
 
 %install
