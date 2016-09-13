@@ -441,7 +441,7 @@ CONFIGURE_ARGS=$(echo $CONFIGURE_ARGS | sed -e 's/"\?--with-kmp-moddir=[^ ][^ ]*
 
 %eval_configure \
 	%{?kdir: --with-linux=%kdir} %{?kobjdir: --with-linux-obj=%kobjdir} \
-	$CONFIGURE_ARGS --with-kmp-moddir=%{kmoddir}
+	$CONFIGURE_ARGS --with-kmp-moddir=%{kmoddir} || true
 pwd
 ls -la
 cat config.log
