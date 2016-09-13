@@ -439,6 +439,10 @@ CONFIGURE_ARGS=$(echo $CONFIGURE_ARGS | sed -e 's/"\?--with-kmp-moddir=[^ ][^ ]*
 # inside $CONFIGURE_ARGS
 %define eval_configure %(echo '%configure' | sed -e 's#\./configure#eval ./configure#' -e 's/--\\(build\\|host\\|target\\)=[^ ][^ ]* //g')
 
+which ld
+ld --version
+ld -z relro
+
 %eval_configure \
 	%{?kdir: --with-linux=%kdir} %{?kobjdir: --with-linux-obj=%kobjdir} \
 	$CONFIGURE_ARGS --with-kmp-moddir=%{kmoddir} || true
