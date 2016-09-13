@@ -46,7 +46,8 @@ BuildRequires: kernel-devel = 2.6.32-431.el6
 %define centos_kernel 4.2.0-0.21.el7
 BuildRequires: kernel = %{centos_kernel}
 BuildRequires: kernel-devel = %{centos_kernel}
-%define kdir /usr/src/kernels/%{centos_kernel}.%(uname -m)
+%define kdir /lib/modules/%{centos_kernel}.%(uname -m)/source/
+%define kobjdir /lib/modules/%{centos_kernel}.%(uname -m)/build/
 
 %endif
 
@@ -439,16 +440,13 @@ CONFIGURE_ARGS=$(echo $CONFIGURE_ARGS | sed -e 's/"\?--with-kmp-moddir=[^ ][^ ]*
 # inside $CONFIGURE_ARGS
 %define eval_configure %(echo '%configure' | sed -e 's#\./configure#eval ./configure#' -e 's/--\\(build\\|host\\|target\\)=[^ ][^ ]* //g')
 
-which ld
-ld --version
-ld -z relro
-
 %eval_configure \
 	%{?kdir: --with-linux=%kdir} %{?kobjdir: --with-linux-obj=%kobjdir} \
 	$CONFIGURE_ARGS --with-kmp-moddir=%{kmoddir} || true
 pwd
 ls -la
 cat config.log
+uname -a
 make %{?_smp_mflags} -s %{?make_args}
 
 %install
