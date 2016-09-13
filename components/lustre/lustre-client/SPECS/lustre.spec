@@ -849,7 +849,7 @@ if [ -x %{rpm_post_base}-osd-ldiskfs.sh ]; then
 fi
 %else
 OSD_LDISKFS_RPM_NAME=$(rpm -q %{name}-osd-ldiskfs | grep "%{version}-%{release}")
-rpm -ql $OSD_LDISKFS_RPM_NAME | grep '\.ko$' > /var/run/%{name}-osd-ldiskfs || true
+rpm -ql $OSD_LDISKFS_RPM_NAME | grep '\.ko$' > /var/run/%{name}-osd-ldiskfs
 %endif
 %if %{with lustre_utils} && %{defined rpm_post_base}
 %preun osd-ldiskfs-mount
