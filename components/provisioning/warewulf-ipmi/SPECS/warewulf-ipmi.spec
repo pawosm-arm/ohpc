@@ -53,12 +53,6 @@ adding IPMI functionality.
 
 
 %build
-
-# override with newer config.guess for aarch64
-%ifarch aarch64
-cp /usr/lib/rpm/config.guess bin
-%endif
-
 %configure --localstatedir=%{wwpkgdir}
 %{__make} %{?mflags}
 
