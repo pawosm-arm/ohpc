@@ -51,7 +51,9 @@ adding IPMI functionality.
 
 %prep
 %setup -n %{pname}-%{version}
+%ifarch aarch64
 %patch0 -p1
+%endif
 
 %build
 %configure --localstatedir=%{wwpkgdir}
