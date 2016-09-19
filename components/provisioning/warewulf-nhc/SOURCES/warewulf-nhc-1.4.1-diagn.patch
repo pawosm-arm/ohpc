@@ -1,0 +1,11 @@
+diff -ruN warewulf-nhc-1.4.1.old/scripts/common.nhc warewulf-nhc-1.4.1/scripts/common.nhc
+--- warewulf-nhc-1.4.1.old/scripts/common.nhc	2014-12-02 23:48:40.000000000 +0000
++++ warewulf-nhc-1.4.1/scripts/common.nhc	2016-09-19 13:20:10.346951728 +0100
+@@ -563,5 +563,7 @@
+                 break
+             fi
+         done < "$LOGIN_DEFS_SRC"
++    else
++        echo $LOGIN_DEFS_SRC could not be read
+     fi
+ }

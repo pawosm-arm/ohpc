@@ -29,6 +29,7 @@ Group:   %{PROJ_NAME}/provisioning
 URL:     http://warewulf.lbl.gov/
 Source0: http://warewulf.lbl.gov/downloads/releases/warewulf-nhc/warewulf-nhc-%{version}.tar.gz
 Source1: OHPC_macros
+Patch0: warewulf-nhc-1.4.1-diagn.patch
 Packager: %{?_packager}%{!?_packager:Michael Jennings <mej@lbl.gov>}
 Vendor:  %{?_vendorinfo}%{!?_vendorinfo:Warewulf Project (http://warewulf.lbl.gov/)}
 Distribution: %{?_distribution:%{_distribution}}%{!?_distribution:%{_vendor}}
@@ -51,7 +52,7 @@ which checks should be run on which nodes.
 
 %prep
 %setup -n %{pname}-%{version}
-
+%patch0 -p1
 
 %build
 %{configure}
