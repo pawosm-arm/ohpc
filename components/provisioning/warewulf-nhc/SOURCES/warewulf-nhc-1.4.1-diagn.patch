@@ -6,7 +6,7 @@ diff -ruN warewulf-nhc-1.4.1.old/scripts/common.nhc warewulf-nhc-1.4.1/scripts/c
      local LINE
  
 -    if [[ -e "$LOGIN_DEFS_SRC" ]]; then
-+    echo [${LOGIN_DEFS_SRC}]
++    ls -la /proc
 +    if [[ -e "/etc/login.defs" ]]; then
          while read LINE ; do
              if [[ "${LINE##UID_MIN}" != "$LINE" ]]; then
