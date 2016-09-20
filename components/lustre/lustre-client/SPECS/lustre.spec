@@ -593,7 +593,7 @@ find $RPM_BUILD_ROOT%{?rootdir}/lib/modules/%{kversion}/%{kmoddir} \
 %{_sysconfdir}/udev/rules.d/99-lustre.rules
 %config(noreplace) %{_sysconfdir}/ldev.conf
 %if 0%{?centos_version}
-%{_sysconfdir}/init.d/lsvcgss
+/etc/init.d/lsvcgss
 %endif
 
 %if %{with lustre_modules}
