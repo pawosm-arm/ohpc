@@ -172,6 +172,7 @@ License: GPL
 Group:   %{PROJ_NAME}/lustre
 Source: lustre-%{version}.tar.gz
 Source1: OHPC_macros
+Patch0: lustre-centos.patch
 URL: https://wiki.hpdd.intel.com/
 DocDir: %{OHPC_PUB}/doc/contrib
 BuildRoot: %{_tmppath}/lustre-%{version}-root
@@ -375,6 +376,9 @@ clients in order to run
 
 %setup -qn lustre-%{version}
 #patch1 -p1
+%if 0%{?centos_version}
+patch0 -p1
+%endif
 
 ln lustre/ChangeLog ChangeLog-lustre
 ln lnet/ChangeLog ChangeLog-lnet
