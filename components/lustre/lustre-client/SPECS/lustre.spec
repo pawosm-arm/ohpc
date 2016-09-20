@@ -442,6 +442,10 @@ fi
 # it will be set --with-kmp-moddir=%%kmoddir
 CONFIGURE_ARGS=$(echo $CONFIGURE_ARGS | sed -e 's/"\?--with-kmp-moddir=[^ ][^ ]* \?//')
 
+%ifarch aarch64
+CONFIGURE_ARGS="$CONFIGURE_ARGS LDFLAGS=\"\""
+%endif
+
 # we need to eval "configure" because $CONFIGURE_ARGS could have a quoted
 # string in it which we don't want word splitted by the shell
 # also remove (build|host|target) options because they will be specified
