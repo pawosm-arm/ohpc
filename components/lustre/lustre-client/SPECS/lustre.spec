@@ -589,6 +589,8 @@ find $RPM_BUILD_ROOT%{?rootdir}/lib/modules/%{kversion}/%{kmoddir} \
 %{_sysconfdir}/udev/rules.d/99-lustre.rules
 %config(noreplace) %{_sysconfdir}/ldev.conf
 %if 0%{?centos_version}
+ls -la /etc/init.d
+cat /etc/init.d/lsvcgss || true
 /etc/init.d/lsvcgss
 %endif
 
