@@ -377,7 +377,7 @@ clients in order to run
 %setup -qn lustre-%{version}
 #patch1 -p1
 %if 0%{?centos_version}
-patch0 -p1
+%patch0 -p1
 %endif
 
 ln lustre/ChangeLog ChangeLog-lustre
