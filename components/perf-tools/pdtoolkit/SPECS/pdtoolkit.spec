@@ -99,26 +99,43 @@ rm -f %buildroot%{install_path}/contrib/rose/edg44/x86_64/roseparse/config.statu
 rm -f %buildroot%{install_path}/.all_configs
 rm -f %buildroot%{install_path}/.last_config
 
-%ifarch x86_64
-pushd %buildroot%{install_path}/x86_64/bin
+%ifarch aarch64
+%define arch_dir arm64_linux
+%elifarch ppc64 ppc64p7
+%define arch_dir ppc64
+%else
+%define arch_dir x86_64
+%endif
+
+pushd %buildroot%{install_path}/%{arch_dir}/bin
 sed -i 's|%{buildroot}||g' $(egrep -IR '%{buildroot}' ./|awk -F : '{print $1}')
 rm -f edg33-upcparse
+%ifarch x86_64
 ln -s ../../contrib/rose/roseparse/upcparse edg33-upcparse
 sed -i 's|%buildroot||g' ../../contrib/rose/roseparse/upcparse
+%endif
 rm -f edg44-c-roseparse
-ln -s  ../../contrib/rose/edg44/x86_64/roseparse/edg44-c-roseparse
-sed -i 's|%buildroot||g' ../../contrib/rose/edg44/x86_64/roseparse/edg44-c-roseparse
+%ifnarch aarch64
+ln -s  ../../contrib/rose/edg44/%{arch_dir}/roseparse/edg44-c-roseparse
+sed -i 's|%buildroot||g' ../../contrib/rose/edg44/%{arch_dir}/roseparse/edg44-c-roseparse
+%endif
 rm -f edg44-cxx-roseparse
-ln -s  ../../contrib/rose/edg44/x86_64/roseparse/edg44-cxx-roseparse
-sed -i 's|%buildroot||g' ../../contrib/rose/edg44/x86_64/roseparse/edg44-cxx-roseparse
+%ifnarch aarch64
+ln -s  ../../contrib/rose/edg44/%{arch_dir}/roseparse/edg44-cxx-roseparse
+sed -i 's|%buildroot||g' ../../contrib/rose/edg44/%{arch_dir}/roseparse/edg44-cxx-roseparse
+%endif
 rm -f edg44-upcparse
-ln -s  ../../contrib/rose/edg44/x86_64/roseparse/edg44-upcparse
-sed -i 's|%buildroot||g' ../../contrib/rose/edg44/x86_64/roseparse/edg44-upcparse
+%ifnarch aarch64
+ln -s  ../../contrib/rose/edg44/%{arch_dir}/roseparse/edg44-upcparse
+sed -i 's|%buildroot||g' ../../contrib/rose/edg44/%{arch_dir}/roseparse/edg44-upcparse
+%endif
 rm -f pebil.static
 ln -s  ../../contrib/pebil/pebil/pebil.static
 rm -f roseparse
+%ifarch x86_64
 ln -s  ../../contrib/rose/roseparse/roseparse
 sed -i 's|%buildroot||g' ../../contrib/rose/roseparse/roseparse
+%endif
 sed -i 's|/usr/local/bin/perl|/usr/bin/perl|g' ../../contrib/rose/rose-header-gen/config/depend.pl
 sed -i 's|/usr/local/bin/perl|/usr/bin/perl|g' ../../contrib/rose/rose-header-gen/config/cmp.pl
 rm -f ../../contrib/rose/rose-header-gen/config.log
@@ -126,12 +143,10 @@ rm -f ../../contrib/rose/rose-header-gen/config.status
 rm -f smaqao
 ln -s  ../../contrib/maqao/maqao/smaqao
 popd
-pushd %buildroot%{install_path}/x86_64
+pushd %buildroot%{install_path}/%{arch_dir}
 rm -f include
 ln -s ../include
 popd
-%endif
-
 install -d %buildroot%{install_path}/include
 install -d %buildroot%{install_path}/lib
 install -d %buildroot%{install_path}/man
@@ -157,23 +172,13 @@ module-whatis "URL %{url}"
 
 set     version                     %{version}
 
-%ifarch x86_64
-prepend-path    PATH                %{install_path}/x86_64/bin
-%endif
-%ifarch aarch64
-prepend-path    PATH                %{install_path}/arm64_linux/bin
-%endif
+prepend-path    PATH                %{install_path}/%{arch_dir}/bin
 prepend-path    MANPATH             %{install_path}/man
 prepend-path    INCLUDE             %{install_path}/include
 prepend-path    LD_LIBRARY_PATH     %{install_path}/lib
 
 setenv          %{PNAME}_DIR        %{install_path}
-%ifarch x86_64
-setenv          %{PNAME}_BIN        %{install_path}/x86_64/bin
-%endif
-%ifarch aarch64
-setenv          %{PNAME}_BIN        %{install_path}/arm64_linux/bin
-%endif
+setenv          %{PNAME}_BIN        %{install_path}/%{arch_dir}/bin
 setenv          %{PNAME}_LIB        %{install_path}/lib
 setenv          %{PNAME}_INC        %{install_path}/include
 
