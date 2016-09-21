@@ -101,8 +101,6 @@ rm -f %buildroot%{install_path}/.last_config
 
 %ifarch aarch64
 %define arch_dir arm64_linux
-%elifarch ppc64
-%define arch_dir ppc64
 %else
 %define arch_dir x86_64
 %endif
