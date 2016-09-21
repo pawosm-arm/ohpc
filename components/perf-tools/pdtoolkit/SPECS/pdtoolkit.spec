@@ -98,6 +98,8 @@ rm -f %buildroot%{install_path}/contrib/rose/edg44/x86_64/roseparse/config.log
 rm -f %buildroot%{install_path}/contrib/rose/edg44/x86_64/roseparse/config.status
 rm -f %buildroot%{install_path}/.all_configs
 rm -f %buildroot%{install_path}/.last_config
+
+%ifarch x86_64
 pushd %buildroot%{install_path}/x86_64/bin
 sed -i 's|%{buildroot}||g' $(egrep -IR '%{buildroot}' ./|awk -F : '{print $1}')
 rm -f edg33-upcparse
@@ -128,6 +130,8 @@ pushd %buildroot%{install_path}/x86_64
 rm -f include
 ln -s ../include
 popd
+%endif
+
 install -d %buildroot%{install_path}/include
 install -d %buildroot%{install_path}/lib
 install -d %buildroot%{install_path}/man
@@ -153,13 +157,23 @@ module-whatis "URL %{url}"
 
 set     version                     %{version}
 
+%ifarch x86_64
 prepend-path    PATH                %{install_path}/x86_64/bin
+%endif
+%ifarch aarch64
+prepend-path    PATH                %{install_path}/arm64_linux/bin
+%endif
 prepend-path    MANPATH             %{install_path}/man
 prepend-path    INCLUDE             %{install_path}/include
 prepend-path    LD_LIBRARY_PATH     %{install_path}/lib
 
 setenv          %{PNAME}_DIR        %{install_path}
+%ifarch x86_64
 setenv          %{PNAME}_BIN        %{install_path}/x86_64/bin
+%endif
+%ifarch aarch64
+setenv          %{PNAME}_BIN        %{install_path}/arm64_linux/bin
+%endif
 setenv          %{PNAME}_LIB        %{install_path}/lib
 setenv          %{PNAME}_INC        %{install_path}/include
 
