@@ -95,6 +95,8 @@ BuildRequires:  fftw-%{compiler_family}-%{mpi_family}%{PROJ_DELIM}
 BuildRequires:  lapack-devel
 BuildRequires:  python-devel
 BuildRequires:  python-numpy-%{compiler_family}%{PROJ_DELIM}
+BuildRequires:  python-setuptools
+BuildRequires:  Cython
 BuildRequires:  swig
 #%if 0%{?suse_version} > 1140
 #BuildRequires:  suitesparse-devel-static
