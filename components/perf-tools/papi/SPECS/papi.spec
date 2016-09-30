@@ -53,7 +53,7 @@ running programs.
 %build
 
 cd src
-CFLAGS="-fPIC -DPIC" CXXFLAGS="-fPIC -DPIC" ./configure --with-static-lib=yes --with-shared-lib=yes --with-shlib --prefix=%{install_path}
+./configure --with-static-lib=yes --with-shared-lib=yes --with-shlib --prefix=%{install_path}
 #DBG workaround to make sure libpfm just uses the normal CFLAGS
 DBG="" make
 
