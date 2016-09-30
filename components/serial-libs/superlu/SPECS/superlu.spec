@@ -108,8 +108,8 @@ export OHPC_COMPILER_FAMILY=%{compiler_family}
 . %{_sourcedir}/OHPC_setup_compiler
 
 make lib
-pwd
-mkdir tmp 
+
+mkdir tmp
 (cd tmp; ar -x ../SRC/libsuperlu.a)
 $FC -shared -Wl,-soname,libsuperlu.so.4 -o lib/libsuperlu.so tmp/*.o
 
