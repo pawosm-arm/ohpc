@@ -54,6 +54,27 @@ Requires:      openmpi-%{compiler_family}%{PROJ_DELIM}
 
 #-ohpc-header-comp-end------------------------------------------------
 
+%if 0%{?centos_version} == 700
+# 7.1 kernel version
+# %define centos_kernel 3.10.0-229.el7
+
+# 7.2 kernel version
+%ifarch aarch64
+%define centos_kernel 4.2.0-0.21.el7
+BuildRequires: kernel = %{centos_kernel}
+BuildRequires: kernel-devel = %{centos_kernel}
+%define kdir /lib/modules/%{centos_kernel}.aarch64/source/
+%define kobjdir /lib/modules/%{centos_kernel}.aarch64/build/
+%else
+%define centos_kernel 3.10.0-327.el7
+BuildRequires: kernel = %{centos_kernel}
+BuildRequires: kernel-devel = %{centos_kernel}
+%define kdir /lib/modules/%{centos_kernel}.x86_64/source/
+%define kobjdir /lib/modules/%{centos_kernel}.x86_64/build/
+%endif
+
+%endif
+
 # not generating a debug package, CentOS build breaks without this if no debug package defined
 %define debug_package %{nil}
 
