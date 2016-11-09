@@ -1,0 +1,37 @@
+diff -ruN OpenBLAS-0.2.19.old/cmake/system.cmake OpenBLAS-0.2.19/cmake/system.cmake
+--- OpenBLAS-0.2.19.old/cmake/system.cmake	2016-09-01 04:58:42.000000000 +0100
++++ OpenBLAS-0.2.19/cmake/system.cmake	2016-11-09 14:05:48.000000000 +0000
+@@ -435,7 +435,7 @@
+ set(USE_GEMM3M 0)
+ 
+ if (DEFINED ARCH)
+-  if (${ARCH} STREQUAL "x86" OR ${ARCH} STREQUAL "x86_64" OR ${ARCH} STREQUAL "ia64" OR ${ARCH} STREQUAL "MIPS")
++  if (${ARCH} STREQUAL "x86" OR ${ARCH} STREQUAL "x86_64" OR ${ARCH} STREQUAL "ia64" OR ${ARCH} STREQUAL "MIPS" OR ${ARCH} STREQUAL "arm64")
+     set(USE_GEMM3M 1)
+   endif ()
+ 
+diff -ruN OpenBLAS-0.2.19.old/driver/level3/Makefile OpenBLAS-0.2.19/driver/level3/Makefile
+--- OpenBLAS-0.2.19.old/driver/level3/Makefile	2016-09-01 04:58:42.000000000 +0100
++++ OpenBLAS-0.2.19/driver/level3/Makefile	2016-11-09 14:08:01.000000000 +0000
+@@ -19,6 +19,10 @@
+ USE_GEMM3M = 1
+ endif
+ 
++ifeq ($(ARCH), arm64)
++USE_GEMM3M = 1
++endif
++
+ SBLASOBJS	+= \
+ 	sgemm_nn.$(SUFFIX) sgemm_nt.$(SUFFIX) sgemm_tn.$(SUFFIX) sgemm_tt.$(SUFFIX) \
+ 	strmm_LNUU.$(SUFFIX) strmm_LNUN.$(SUFFIX) strmm_LNLU.$(SUFFIX) strmm_LNLN.$(SUFFIX) \
+diff -ruN OpenBLAS-0.2.19.old/kernel/Makefile.L3 OpenBLAS-0.2.19/kernel/Makefile.L3
+--- OpenBLAS-0.2.19.old/kernel/Makefile.L3	2016-09-01 04:58:42.000000000 +0100
++++ OpenBLAS-0.2.19/kernel/Makefile.L3	2016-11-09 14:07:04.000000000 +0000
+@@ -17,6 +17,7 @@
+ endif
+ 
+ ifeq ($(ARCH), arm64)
++USE_GEMM3M = 1
+ USE_TRMM = 1
+ endif
+ 
