@@ -1,0 +1,39 @@
+From b5f8854970588a01bef6d096c002a1565d8f5f7e Mon Sep 17 00:00:00 2001
+From: Jonas Hahnfeld <Hahnfeld@itc.rwth-aachen.de>
+Date: Mon, 8 Aug 2016 11:52:49 +0000
+Subject: [PATCH 09/55] Mark tests with task dependencies as unsupported with
+ GCC
+
+git-svn-id: https://llvm.org/svn/llvm-project/openmp/trunk@277996 91177308-0d34-0410-b5e6-96231b3b80d8
+---
+ runtime/test/tasking/bug_nested_proxy_task.c      | 3 +++
+ runtime/test/tasking/bug_proxy_task_dep_waiting.c | 3 +++
+ 2 files changed, 6 insertions(+)
+
+diff --git a/runtime/test/tasking/bug_nested_proxy_task.c b/runtime/test/tasking/bug_nested_proxy_task.c
+index 01fbbcf..f594721 100644
+--- a/runtime/test/tasking/bug_nested_proxy_task.c
++++ b/runtime/test/tasking/bug_nested_proxy_task.c
+@@ -1,4 +1,7 @@
+ // RUN: %libomp-compile -lpthread && %libomp-run
++// The runtime currently does not get dependency information from GCC.
++// UNSUPPORTED: gcc
++
+ #include <stdio.h>
+ #include <omp.h>
+ #include <pthread.h>
+diff --git a/runtime/test/tasking/bug_proxy_task_dep_waiting.c b/runtime/test/tasking/bug_proxy_task_dep_waiting.c
+index c61b828..e6dd895 100644
+--- a/runtime/test/tasking/bug_proxy_task_dep_waiting.c
++++ b/runtime/test/tasking/bug_proxy_task_dep_waiting.c
+@@ -1,4 +1,7 @@
+ // RUN: %libomp-compile -lpthread && %libomp-run
++// The runtime currently does not get dependency information from GCC.
++// UNSUPPORTED: gcc
++
+ #include <stdio.h>
+ #include <omp.h>
+ #include <pthread.h>
+-- 
+2.7.3
+

@@ -1,0 +1,257 @@
+From 26eea9efa4f755ee4cb41c773a9420989cd37653 Mon Sep 17 00:00:00 2001
+From: George Rokos <grokos@us.ibm.com>
+Date: Fri, 9 Sep 2016 17:55:26 +0000
+Subject: [PATCH 19/55] [OPENMP] Implementation of omp_get_default_device and
+ omp_set_default_device
+
+Implementation of missing OpenMP 4.0 API functions omp_get_default_device and omp_set_default_device.
+Also, added support for the environment variable OMP_DEFAULT_DEVICE.
+
+Differential Revision: https://reviews.llvm.org/D23587
+
+
+
+git-svn-id: https://llvm.org/svn/llvm-project/openmp/trunk@281065 91177308-0d34-0410-b5e6-96231b3b80d8
+---
+ runtime/src/dllexports      |  4 ++--
+ runtime/src/kmp.h           |  6 ++++++
+ runtime/src/kmp_ftn_entry.h | 33 +++++++++++++++++++++++----------
+ runtime/src/kmp_ftn_os.h    | 16 ++++++++--------
+ runtime/src/kmp_global.c    |  4 ++++
+ runtime/src/kmp_runtime.c   |  1 +
+ runtime/src/kmp_settings.c  | 16 ++++++++++++++++
+ 7 files changed, 60 insertions(+), 20 deletions(-)
+
+diff --git a/runtime/src/dllexports b/runtime/src/dllexports
+index fe1f5f2..571ab56 100644
+--- a/runtime/src/dllexports
++++ b/runtime/src/dllexports
+@@ -494,9 +494,9 @@ kmp_set_warnings_off                        780
+     omp_get_cancellation                    867
+     kmp_get_cancellation_status             868
+     omp_is_initial_device                   869
++    omp_set_default_device                  879
++    omp_get_default_device                  880
+     %ifdef stub
+-        omp_set_default_device              879
+-        omp_get_default_device              880
+         omp_get_num_devices                 881
+     %endif
+ %endif # OMP_40
+diff --git a/runtime/src/kmp.h b/runtime/src/kmp.h
+index 2ec0141..88e288b 100644
+--- a/runtime/src/kmp.h
++++ b/runtime/src/kmp.h
+@@ -1091,6 +1091,8 @@ extern int __kmp_place_num_threads_per_core;
+ 
+ #define KMP_MAX_ACTIVE_LEVELS_LIMIT INT_MAX
+ 
++#define KMP_MAX_DEFAULT_DEVICE_LIMIT INT_MAX
++
+ #define KMP_MAX_TASK_PRIORITY_LIMIT INT_MAX
+ 
+ /* Minimum number of threads before switch to TLS gtid (experimentally determined) */
+@@ -1812,6 +1814,7 @@ typedef struct kmp_internal_control {
+     kmp_r_sched_t sched;                 /* internal control for runtime schedule {sched,chunk} pair */
+ #if OMP_40_ENABLED
+     kmp_proc_bind_t proc_bind;           /* internal control for affinity  */
++    kmp_int32       default_device;      /* internal control for default device */
+ #endif // OMP_40_ENABLED
+     struct kmp_internal_control *next;
+ } kmp_internal_control_t;
+@@ -2055,6 +2058,9 @@ typedef enum kmp_tasking_mode {
+ 
+ extern kmp_tasking_mode_t __kmp_tasking_mode;         /* determines how/when to execute tasks */
+ extern kmp_int32 __kmp_task_stealing_constraint;
++#if OMP_40_ENABLED
++    extern kmp_int32 __kmp_default_device; // Set via OMP_DEFAULT_DEVICE if specified, defaults to 0 otherwise
++#endif
+ #if OMP_45_ENABLED
+     extern kmp_int32 __kmp_max_task_priority; // Set via OMP_MAX_TASK_PRIORITY if specified, defaults to 0 otherwise
+ #endif
+diff --git a/runtime/src/kmp_ftn_entry.h b/runtime/src/kmp_ftn_entry.h
+index b9de5e3..7ad15e3 100644
+--- a/runtime/src/kmp_ftn_entry.h
++++ b/runtime/src/kmp_ftn_entry.h
+@@ -904,19 +904,28 @@ xexpand(FTN_GET_TEAM_NUM)( void )
+     #endif
+ }
+ 
+-#if KMP_MIC || KMP_OS_DARWIN || defined(KMP_STUB)
+-
+ int FTN_STDCALL
+-FTN_GET_DEFAULT_DEVICE( void )
++xexpand(FTN_GET_DEFAULT_DEVICE)( void )
+ {
+-    return 0;
++    #if KMP_MIC || KMP_OS_DARWIN || defined(KMP_STUB)
++        return 0;
++    #else
++        return __kmp_entry_thread() -> th.th_current_task -> td_icvs.default_device;
++    #endif
+ }
+ 
+ void FTN_STDCALL
+-FTN_SET_DEFAULT_DEVICE( int KMP_DEREF arg )
++xexpand(FTN_SET_DEFAULT_DEVICE)( int KMP_DEREF arg )
+ {
++    #if KMP_MIC || KMP_OS_DARWIN || defined(KMP_STUB)
++    // Nothing.
++    #else
++        __kmp_entry_thread() -> th.th_current_task -> td_icvs.default_device = KMP_DEREF arg;
++    #endif
+ }
+ 
++#if KMP_MIC || KMP_OS_DARWIN || defined(KMP_STUB)
++
+ int FTN_STDCALL
+ FTN_GET_NUM_DEVICES( void )
+ {
+@@ -1391,6 +1400,8 @@ xaliasify(FTN_GET_PROC_BIND, 40);
+ xaliasify(FTN_GET_NUM_TEAMS, 40);
+ xaliasify(FTN_GET_TEAM_NUM, 40);
+ xaliasify(FTN_GET_CANCELLATION, 40);
++xaliasify(FTN_GET_DEFAULT_DEVICE, 40);
++xaliasify(FTN_SET_DEFAULT_DEVICE, 40);
+ xaliasify(FTN_IS_INITIAL_DEVICE, 40);
+ #endif /* OMP_40_ENABLED */
+ 
+@@ -1456,11 +1467,13 @@ xversionify(FTN_IN_FINAL,          31, "OMP_3.1");
+ 
+ #if OMP_40_ENABLED
+ // OMP_4.0 versioned symbols
+-xversionify(FTN_GET_PROC_BIND,     40, "OMP_4.0");
+-xversionify(FTN_GET_NUM_TEAMS,     40, "OMP_4.0");
+-xversionify(FTN_GET_TEAM_NUM,      40, "OMP_4.0");
+-xversionify(FTN_GET_CANCELLATION,  40, "OMP_4.0");
+-xversionify(FTN_IS_INITIAL_DEVICE, 40, "OMP_4.0");
++xversionify(FTN_GET_PROC_BIND,      40, "OMP_4.0");
++xversionify(FTN_GET_NUM_TEAMS,      40, "OMP_4.0");
++xversionify(FTN_GET_TEAM_NUM,       40, "OMP_4.0");
++xversionify(FTN_GET_CANCELLATION,   40, "OMP_4.0");
++xversionify(FTN_GET_DEFAULT_DEVICE, 40, "OMP_4.0");
++xversionify(FTN_SET_DEFAULT_DEVICE, 40, "OMP_4.0");
++xversionify(FTN_IS_INITIAL_DEVICE,  40, "OMP_4.0");
+ #endif /* OMP_40_ENABLED */
+ 
+ #if OMP_45_ENABLED
+diff --git a/runtime/src/kmp_ftn_os.h b/runtime/src/kmp_ftn_os.h
+index 44fb7c9..2698a35 100644
+--- a/runtime/src/kmp_ftn_os.h
++++ b/runtime/src/kmp_ftn_os.h
+@@ -103,10 +103,10 @@
+ 
+ #if OMP_40_ENABLED
+ #if KMP_MIC || KMP_OS_DARWIN || defined(KMP_STUB)
+-    #define FTN_GET_DEFAULT_DEVICE               omp_get_default_device
+-    #define FTN_SET_DEFAULT_DEVICE               omp_set_default_device
+     #define FTN_GET_NUM_DEVICES                  omp_get_num_devices
+ #endif
++    #define FTN_GET_DEFAULT_DEVICE               omp_get_default_device
++    #define FTN_SET_DEFAULT_DEVICE               omp_set_default_device
+     #define FTN_IS_INITIAL_DEVICE                omp_is_initial_device
+ #endif
+ 
+@@ -221,10 +221,10 @@
+ 
+ #if OMP_40_ENABLED
+ #if KMP_MIC || KMP_OS_DARWIN || defined(KMP_STUB)
+-    #define FTN_GET_DEFAULT_DEVICE               omp_get_default_device_
+-    #define FTN_SET_DEFAULT_DEVICE               omp_set_default_device_
+     #define FTN_GET_NUM_DEVICES                  omp_get_num_devices_
+ #endif
++    #define FTN_GET_DEFAULT_DEVICE               omp_get_default_device_
++    #define FTN_SET_DEFAULT_DEVICE               omp_set_default_device_
+     #define FTN_IS_INITIAL_DEVICE                omp_is_initial_device_
+ #endif
+ 
+@@ -340,10 +340,10 @@
+ 
+ #if OMP_40_ENABLED
+ #if KMP_MIC || KMP_OS_DARWIN || defined(KMP_STUB)
+-    #define FTN_GET_DEFAULT_DEVICE               OMP_GET_DEFAULT_DEVICE
+-    #define FTN_SET_DEFAULT_DEVICE               OMP_SET_DEFAULT_DEVICE
+     #define FTN_GET_NUM_DEVICES                  OMP_GET_NUM_DEVICES
+ #endif
++    #define FTN_GET_DEFAULT_DEVICE               OMP_GET_DEFAULT_DEVICE
++    #define FTN_SET_DEFAULT_DEVICE               OMP_SET_DEFAULT_DEVICE
+     #define FTN_IS_INITIAL_DEVICE                OMP_IS_INITIAL_DEVICE
+ #endif
+ 
+@@ -459,10 +459,10 @@
+ 
+ #if OMP_40_ENABLED
+ #if KMP_MIC || KMP_OS_DARWIN || defined(KMP_STUB)
+-    #define FTN_GET_DEFAULT_DEVICE               OMP_GET_DEFAULT_DEVICE_
+-    #define FTN_SET_DEFAULT_DEVICE               OMP_SET_DEFAULT_DEVICE_
+     #define FTN_GET_NUM_DEVICES                  OMP_GET_NUM_DEVICES_
+ #endif
++    #define FTN_GET_DEFAULT_DEVICE               OMP_GET_DEFAULT_DEVICE_
++    #define FTN_SET_DEFAULT_DEVICE               OMP_SET_DEFAULT_DEVICE_
+     #define FTN_IS_INITIAL_DEVICE                OMP_IS_INITIAL_DEVICE_
+ #endif
+ 
+diff --git a/runtime/src/kmp_global.c b/runtime/src/kmp_global.c
+index 2cf0e2f..ac4fdbe 100644
+--- a/runtime/src/kmp_global.c
++++ b/runtime/src/kmp_global.c
+@@ -262,6 +262,10 @@ int __kmp_place_num_cores = 0;
+ int __kmp_place_core_offset = 0;
+ int __kmp_place_num_threads_per_core = 0;
+ 
++#if OMP_40_ENABLED
++kmp_int32 __kmp_default_device = 0;
++#endif
++
+ kmp_tasking_mode_t __kmp_tasking_mode = tskm_task_teams;
+ #if OMP_45_ENABLED
+ kmp_int32 __kmp_max_task_priority = 0;
+diff --git a/runtime/src/kmp_runtime.c b/runtime/src/kmp_runtime.c
+index 0e20e7b..82c0445 100644
+--- a/runtime/src/kmp_runtime.c
++++ b/runtime/src/kmp_runtime.c
+@@ -3035,6 +3035,7 @@ __kmp_get_global_icvs( void ) {
+       r_sched,                      //kmp_r_sched_t sched;      //internal control for runtime schedule {sched,chunk} pair
+ #if OMP_40_ENABLED
+       __kmp_nested_proc_bind.bind_types[0],
++      __kmp_default_device,
+ #endif /* OMP_40_ENABLED */
+       NULL                          //struct kmp_internal_control *next;
+     };
+diff --git a/runtime/src/kmp_settings.c b/runtime/src/kmp_settings.c
+index 1da8bbe..bb6c044 100644
+--- a/runtime/src/kmp_settings.c
++++ b/runtime/src/kmp_settings.c
+@@ -1182,6 +1182,19 @@ __kmp_stg_print_max_active_levels( kmp_str_buf_t * buffer, char const * name, vo
+     __kmp_stg_print_int( buffer, name, __kmp_dflt_max_active_levels );
+ } // __kmp_stg_print_max_active_levels
+ 
++#if OMP_40_ENABLED
++// -------------------------------------------------------------------------------------------------
++// OpenMP 4.0: OMP_DEFAULT_DEVICE
++// -------------------------------------------------------------------------------------------------
++static void __kmp_stg_parse_default_device(char const *name, char const *value, void *data) {
++  __kmp_stg_parse_int(name, value, 0, KMP_MAX_DEFAULT_DEVICE_LIMIT, &__kmp_default_device);
++} // __kmp_stg_parse_default_device
++
++static void __kmp_stg_print_default_device(kmp_str_buf_t *buffer, char const *name, void *data) {
++  __kmp_stg_print_int(buffer, name, __kmp_default_device);
++} // __kmp_stg_print_default_device
++#endif
++
+ #if OMP_45_ENABLED
+ // -------------------------------------------------------------------------------------------------
+ // OpenMP 4.5: OMP_MAX_TASK_PRIORITY
+@@ -4677,6 +4690,9 @@ static kmp_setting_t __kmp_stg_table[] = {
+     { "KMP_TASKING",                       __kmp_stg_parse_tasking,            __kmp_stg_print_tasking,            NULL, 0, 0 },
+     { "KMP_TASK_STEALING_CONSTRAINT",      __kmp_stg_parse_task_stealing,      __kmp_stg_print_task_stealing,      NULL, 0, 0 },
+     { "OMP_MAX_ACTIVE_LEVELS",             __kmp_stg_parse_max_active_levels,  __kmp_stg_print_max_active_levels,  NULL, 0, 0 },
++#if OMP_40_ENABLED
++    { "OMP_DEFAULT_DEVICE",                __kmp_stg_parse_default_device,     __kmp_stg_print_default_device,     NULL, 0, 0 },
++#endif
+ #if OMP_45_ENABLED
+     { "OMP_MAX_TASK_PRIORITY",             __kmp_stg_parse_max_task_priority,  __kmp_stg_print_max_task_priority,  NULL, 0, 0 },
+ #endif
+-- 
+2.7.3
+

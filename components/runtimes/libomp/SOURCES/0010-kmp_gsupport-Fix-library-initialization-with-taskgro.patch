@@ -1,0 +1,52 @@
+From 5c3fd1d828f70536416bb4735266414524146278 Mon Sep 17 00:00:00 2001
+From: Jonas Hahnfeld <Hahnfeld@itc.rwth-aachen.de>
+Date: Mon, 8 Aug 2016 13:23:08 +0000
+Subject: [PATCH 10/55] kmp_gsupport: Fix library initialization with taskgroup
+
+Differential Revision: https://reviews.llvm.org/D23259
+
+git-svn-id: https://llvm.org/svn/llvm-project/openmp/trunk@278003 91177308-0d34-0410-b5e6-96231b3b80d8
+---
+ runtime/src/kmp_gsupport.c                  |  2 +-
+ runtime/test/tasking/bug_serial_taskgroup.c | 16 ++++++++++++++++
+ 2 files changed, 17 insertions(+), 1 deletion(-)
+ create mode 100644 runtime/test/tasking/bug_serial_taskgroup.c
+
+diff --git a/runtime/src/kmp_gsupport.c b/runtime/src/kmp_gsupport.c
+index 23c97d1..62baa2b 100644
+--- a/runtime/src/kmp_gsupport.c
++++ b/runtime/src/kmp_gsupport.c
+@@ -1259,7 +1259,7 @@ PARALLEL_LOOP(xexpand(KMP_API_NAME_GOMP_PARALLEL_LOOP_RUNTIME), kmp_sch_runtime)
+ void
+ xexpand(KMP_API_NAME_GOMP_TASKGROUP_START)(void)
+ {
+-    int gtid = __kmp_get_gtid();
++    int gtid = __kmp_entry_gtid();
+     MKLOC(loc, "GOMP_taskgroup_start");
+     KA_TRACE(20, ("GOMP_taskgroup_start: T#%d\n", gtid));
+ 
+diff --git a/runtime/test/tasking/bug_serial_taskgroup.c b/runtime/test/tasking/bug_serial_taskgroup.c
+new file mode 100644
+index 0000000..850bc90
+--- /dev/null
++++ b/runtime/test/tasking/bug_serial_taskgroup.c
+@@ -0,0 +1,16 @@
++// RUN: %libomp-compile-and-run
++
++/*
++ GCC failed this test because __kmp_get_gtid() instead of __kmp_entry_gtid()
++ was called in xexpand(KMP_API_NAME_GOMP_TASKGROUP_START)(void).
++ __kmp_entry_gtid() will initialize the runtime if not yet done which does not
++ happen with __kmp_get_gtid().
++ */
++
++int main()
++{
++    #pragma omp taskgroup
++    { }
++
++    return 0;
++}
+-- 
+2.7.3
+

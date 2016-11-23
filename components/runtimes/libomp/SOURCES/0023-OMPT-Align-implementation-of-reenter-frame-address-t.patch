@@ -1,0 +1,362 @@
+From 4890f690354e7d35c3a2a807621b0be574cd75dc Mon Sep 17 00:00:00 2001
+From: Jonas Hahnfeld <Hahnfeld@itc.rwth-aachen.de>
+Date: Wed, 14 Sep 2016 13:59:13 +0000
+Subject: [PATCH 23/55] [OMPT] Align implementation of reenter frame address to
+ latest (frozen) version of OMPT spec
+
+The latest OMPT spec changed the semantic of a tasks reenter frame to be the application frame, that will be entered, when the runtime frame drops.
+Before it was the last frame in the runtime. This doesn't work for some gcc execution pathes or even clang generated code for :
+Since there is no runtime frame between the executed task and the encountering task.
+
+The test case compares exit and reenter addresses against addresses captured in application code
+
+Patch by Joachim Protze!
+
+Differential Revision: https://reviews.llvm.org/D23305
+
+git-svn-id: https://llvm.org/svn/llvm-project/openmp/trunk@281464 91177308-0d34-0410-b5e6-96231b3b80d8
+---
+ runtime/src/kmp_csupport.c          | 19 ++++++++++++++++---
+ runtime/src/kmp_gsupport.c          | 18 +++++++++---------
+ runtime/src/kmp_runtime.c           | 14 +++++++-------
+ runtime/src/kmp_tasking.c           | 10 +++++-----
+ runtime/src/ompt-specific.c         |  4 ++--
+ runtime/test/ompt/parallel/nested.c | 27 +++++++++++++++++++--------
+ 6 files changed, 58 insertions(+), 34 deletions(-)
+
+diff --git a/runtime/src/kmp_csupport.c b/runtime/src/kmp_csupport.c
+index 4c1d204..10512e8 100644
+--- a/runtime/src/kmp_csupport.c
++++ b/runtime/src/kmp_csupport.c
+@@ -306,7 +306,7 @@ __kmpc_fork_call(ident_t *loc, kmp_int32 argc, kmpc_micro microtask, ...)
+     kmp_team_t *parent_team = master_th->th.th_team;
+     if (ompt_enabled) {
+        parent_team->t.t_implicit_task_taskdata[tid].
+-           ompt_task_info.frame.reenter_runtime_frame = __builtin_frame_address(0);
++           ompt_task_info.frame.reenter_runtime_frame = __builtin_frame_address(1);
+     }
+ #endif
+ 
+@@ -341,7 +341,7 @@ __kmpc_fork_call(ident_t *loc, kmp_int32 argc, kmpc_micro microtask, ...)
+ #if OMPT_SUPPORT
+     if (ompt_enabled) {
+         parent_team->t.t_implicit_task_taskdata[tid].
+-            ompt_task_info.frame.reenter_runtime_frame = 0;
++            ompt_task_info.frame.reenter_runtime_frame = NULL;
+     }
+ #endif
+   }
+@@ -396,7 +396,7 @@ __kmpc_fork_teams(ident_t *loc, kmp_int32 argc, kmpc_micro microtask, ...)
+     int tid = __kmp_tid_from_gtid( gtid );
+     if (ompt_enabled) {
+         parent_team->t.t_implicit_task_taskdata[tid].
+-           ompt_task_info.frame.reenter_runtime_frame = __builtin_frame_address(0);
++           ompt_task_info.frame.reenter_runtime_frame = __builtin_frame_address(1);
+     }
+ #endif
+ 
+@@ -678,6 +678,14 @@ __kmpc_barrier(ident_t *loc, kmp_int32 global_tid)
+         __kmp_check_barrier( global_tid, ct_barrier, loc );
+     }
+ 
++#if OMPT_SUPPORT && OMPT_TRACE
++    ompt_frame_t * ompt_frame;
++    if (ompt_enabled ) {
++        ompt_frame = &( __kmp_threads[ global_tid ] -> th.th_team -> 
++          t.t_implicit_task_taskdata[__kmp_tid_from_gtid(global_tid)].ompt_task_info.frame);
++        ompt_frame->reenter_runtime_frame = __builtin_frame_address(1);
++    }
++#endif
+     __kmp_threads[ global_tid ]->th.th_ident = loc;
+     // TODO: explicit barrier_wait_id:
+     //   this function is called when 'barrier' directive is present or
+@@ -687,6 +695,11 @@ __kmpc_barrier(ident_t *loc, kmp_int32 global_tid)
+     // 4) no sync is required
+ 
+     __kmp_barrier( bs_plain_barrier, global_tid, FALSE, 0, NULL, NULL );
++#if OMPT_SUPPORT && OMPT_TRACE
++    if (ompt_enabled ) {
++        ompt_frame->reenter_runtime_frame = NULL;
++    }
++#endif
+ }
+ 
+ /* The BARRIER for a MASTER section is always explicit   */
+diff --git a/runtime/src/kmp_gsupport.c b/runtime/src/kmp_gsupport.c
+index 62baa2b..ba1b90d 100644
+--- a/runtime/src/kmp_gsupport.c
++++ b/runtime/src/kmp_gsupport.c
+@@ -416,7 +416,7 @@ __kmp_GOMP_serialized_parallel(ident_t *loc, kmp_int32 gtid, void (*task)(void *
+             __kmp_allocate(sizeof(ompt_lw_taskteam_t));
+         __ompt_lw_taskteam_init(lwt, thr, gtid, (void *) task, ompt_parallel_id);
+         lwt->ompt_task_info.task_id = my_ompt_task_id;
+-        lwt->ompt_task_info.frame.exit_runtime_frame = 0;
++        lwt->ompt_task_info.frame.exit_runtime_frame = NULL;
+         __ompt_lw_taskteam_link(lwt, thr);
+ 
+ #if OMPT_TRACE
+@@ -442,7 +442,7 @@ xexpand(KMP_API_NAME_GOMP_PARALLEL_START)(void (*task)(void *), void *data, unsi
+ 
+     if (ompt_enabled) {
+         parent_frame = __ompt_get_task_frame_internal(0);
+-        parent_frame->reenter_runtime_frame = __builtin_frame_address(0);
++        parent_frame->reenter_runtime_frame = __builtin_frame_address(1);
+     }
+ #endif
+ 
+@@ -495,7 +495,7 @@ xexpand(KMP_API_NAME_GOMP_PARALLEL_END)(void)
+         // Record that we re-entered the runtime system in the implicit
+         // task frame representing the parallel region.
+         ompt_frame = &task_info->frame;
+-        ompt_frame->reenter_runtime_frame = __builtin_frame_address(0);
++        ompt_frame->reenter_runtime_frame = __builtin_frame_address(1);
+ 
+         // unlink if necessary. no-op if there is not a lightweight task.
+         ompt_lw_taskteam_t *lwt = __ompt_lw_taskteam_unlink(thr);
+@@ -509,7 +509,7 @@ xexpand(KMP_API_NAME_GOMP_PARALLEL_END)(void)
+               // remaining deepest task knows the stack frame where the runtime
+               // was reentered.
+               ompt_frame = __ompt_get_task_frame_internal(0);
+-              ompt_frame->reenter_runtime_frame = __builtin_frame_address(0);
++              ompt_frame->reenter_runtime_frame = __builtin_frame_address(1);
+            }
+ #endif
+         }
+@@ -525,7 +525,7 @@ xexpand(KMP_API_NAME_GOMP_PARALLEL_END)(void)
+           // Set reenter frame in parent task, which will become current task
+           // in the midst of join. This is needed before the end_parallel callback.
+           ompt_frame = __ompt_get_task_frame_internal(1);
+-          ompt_frame->reenter_runtime_frame = __builtin_frame_address(0);
++          ompt_frame->reenter_runtime_frame = __builtin_frame_address(1);
+         }
+ #endif
+ 
+@@ -555,7 +555,7 @@ xexpand(KMP_API_NAME_GOMP_PARALLEL_END)(void)
+         if (ompt_enabled) {
+             // Record that we re-entered the runtime system in the frame that
+             // created the parallel region.
+-            ompt_frame->reenter_runtime_frame = __builtin_frame_address(0);
++            ompt_frame->reenter_runtime_frame = __builtin_frame_address(1);
+ 
+             if (ompt_callbacks.ompt_callback(ompt_event_parallel_end)) {
+                 ompt_task_info_t *task_info = __ompt_get_taskinfo(0);
+@@ -898,7 +898,7 @@ LOOP_NEXT_ULL(xexpand(KMP_API_NAME_GOMP_LOOP_ULL_ORDERED_RUNTIME_NEXT), \
+     ompt_frame_t *parent_frame; \
+     if (ompt_enabled) { \
+         parent_frame = __ompt_get_task_frame_internal(0); \
+-        parent_frame->reenter_runtime_frame = __builtin_frame_address(0); \
++        parent_frame->reenter_runtime_frame = __builtin_frame_address(1); \
+     }
+ 
+ 
+@@ -1002,7 +1002,7 @@ xexpand(KMP_API_NAME_GOMP_TASK)(void (*func)(void *), void *data, void (*copy_fu
+ #if OMPT_SUPPORT
+         if (ompt_enabled) {
+             thread->th.ompt_thread_info = oldInfo;
+-            taskdata->ompt_task_info.frame.exit_runtime_frame = 0;
++            taskdata->ompt_task_info.frame.exit_runtime_frame = NULL;
+         }
+ #endif
+     }
+@@ -1101,7 +1101,7 @@ xexpand(KMP_API_NAME_GOMP_PARALLEL_SECTIONS_START)(void (*task) (void *), void *
+ 
+     if (ompt_enabled) {
+         parent_frame = __ompt_get_task_frame_internal(0);
+-        parent_frame->reenter_runtime_frame = __builtin_frame_address(0);
++        parent_frame->reenter_runtime_frame = __builtin_frame_address(1);
+     }
+ #endif
+ 
+diff --git a/runtime/src/kmp_runtime.c b/runtime/src/kmp_runtime.c
+index 82c0445..fb97c37 100644
+--- a/runtime/src/kmp_runtime.c
++++ b/runtime/src/kmp_runtime.c
+@@ -1550,7 +1550,7 @@ __kmp_fork_call(
+ #if OMPT_SUPPORT
+             if (ompt_enabled) {
+ #if OMPT_TRACE
+-                lw_taskteam.ompt_task_info.frame.exit_runtime_frame = 0;
++                lw_taskteam.ompt_task_info.frame.exit_runtime_frame = NULL;
+ 
+                 if (ompt_callbacks.ompt_callback(ompt_event_implicit_task_end)) {
+                     ompt_callbacks.ompt_callback(ompt_event_implicit_task_end)(
+@@ -1746,7 +1746,7 @@ __kmp_fork_call(
+ 
+ #if OMPT_SUPPORT
+                 if (ompt_enabled) {
+-                    lw_taskteam.ompt_task_info.frame.exit_runtime_frame = 0;
++                    lw_taskteam.ompt_task_info.frame.exit_runtime_frame = NULL;
+ 
+ #if OMPT_TRACE
+                     if (ompt_callbacks.ompt_callback(ompt_event_implicit_task_end)) {
+@@ -1853,7 +1853,7 @@ __kmp_fork_call(
+ #if OMPT_SUPPORT
+                 if (ompt_enabled) {
+ #if OMPT_TRACE
+-                    lw_taskteam.ompt_task_info.frame.exit_runtime_frame = 0;
++                    lw_taskteam.ompt_task_info.frame.exit_runtime_frame = NULL;
+ 
+                     if (ompt_callbacks.ompt_callback(ompt_event_implicit_task_end)) {
+                         ompt_callbacks.ompt_callback(ompt_event_implicit_task_end)(
+@@ -1885,7 +1885,7 @@ __kmp_fork_call(
+                 unwrapped_task, ompt_parallel_id);
+ 
+             lwt->ompt_task_info.task_id = __ompt_task_id_new(gtid);
+-            lwt->ompt_task_info.frame.exit_runtime_frame = 0;
++            lwt->ompt_task_info.frame.exit_runtime_frame = NULL;
+             __ompt_lw_taskteam_link(lwt, master_th);
+ #endif
+ 
+@@ -2434,7 +2434,7 @@ __kmp_join_call(ident_t *loc, int gtid
+              ompt_callbacks.ompt_callback(ompt_event_implicit_task_end)(
+                parallel_id, task_info->task_id);
+         }
+-        task_info->frame.exit_runtime_frame = 0;
++        task_info->frame.exit_runtime_frame = NULL;
+         task_info->task_id = 0;
+     }
+ #endif
+@@ -5503,7 +5503,7 @@ __kmp_launch_thread( kmp_info_t *this_thr )
+ #if OMPT_SUPPORT
+                 if (ompt_enabled) {
+                     /* no frame set while outside task */
+-                    task_info->frame.exit_runtime_frame = 0;
++                    task_info->frame.exit_runtime_frame = NULL;
+ 
+                     this_thr->th.ompt_thread_info.state = ompt_state_overhead;
+                 }
+@@ -5522,7 +5522,7 @@ __kmp_launch_thread( kmp_info_t *this_thr )
+                     ompt_callbacks.ompt_callback(ompt_event_implicit_task_end)(
+                         my_parallel_id, task_info->task_id);
+                 }
+-                task_info->frame.exit_runtime_frame = 0;
++                task_info->frame.exit_runtime_frame = NULL;
+                 task_info->task_id = 0;
+             }
+ #endif
+diff --git a/runtime/src/kmp_tasking.c b/runtime/src/kmp_tasking.c
+index 2dda197..0c806c2 100644
+--- a/runtime/src/kmp_tasking.c
++++ b/runtime/src/kmp_tasking.c
+@@ -1258,7 +1258,7 @@ __kmp_invoke_task( kmp_int32 gtid, kmp_task_t *task, kmp_taskdata_t * current_ta
+ #if OMPT_SUPPORT
+     if (ompt_enabled) {
+         thread->th.ompt_thread_info = oldInfo;
+-        taskdata->ompt_task_info.frame.exit_runtime_frame = 0;
++        taskdata->ompt_task_info.frame.exit_runtime_frame = NULL;
+     }
+ #endif
+ 
+@@ -1334,7 +1334,7 @@ __kmp_omp_task( kmp_int32 gtid, kmp_task_t * new_task, bool serialize_immediate
+ #if OMPT_SUPPORT
+     if (ompt_enabled) {
+         new_taskdata->ompt_task_info.frame.reenter_runtime_frame =
+-            __builtin_frame_address(0);
++            __builtin_frame_address(1);
+     }
+ #endif
+ 
+@@ -1354,7 +1354,7 @@ __kmp_omp_task( kmp_int32 gtid, kmp_task_t * new_task, bool serialize_immediate
+ 
+ #if OMPT_SUPPORT
+     if (ompt_enabled) {
+-        new_taskdata->ompt_task_info.frame.reenter_runtime_frame = 0;
++        new_taskdata->ompt_task_info.frame.reenter_runtime_frame = NULL;
+     }
+ #endif
+ 
+@@ -1419,7 +1419,7 @@ __kmpc_omp_taskwait( ident_t *loc_ref, kmp_int32 gtid )
+             my_task_id = taskdata->ompt_task_info.task_id;
+             my_parallel_id = team->t.ompt_team_info.parallel_id;
+ 
+-            taskdata->ompt_task_info.frame.reenter_runtime_frame = __builtin_frame_address(0);
++            taskdata->ompt_task_info.frame.reenter_runtime_frame = __builtin_frame_address(1);
+             if (ompt_callbacks.ompt_callback(ompt_event_taskwait_begin)) {
+                 ompt_callbacks.ompt_callback(ompt_event_taskwait_begin)(
+                                 my_parallel_id, my_task_id);
+@@ -1469,7 +1469,7 @@ __kmpc_omp_taskwait( ident_t *loc_ref, kmp_int32 gtid )
+                 ompt_callbacks.ompt_callback(ompt_event_taskwait_end)(
+                                 my_parallel_id, my_task_id);
+             }
+-            taskdata->ompt_task_info.frame.reenter_runtime_frame = 0;
++            taskdata->ompt_task_info.frame.reenter_runtime_frame = NULL;
+         }
+ #endif
+     }
+diff --git a/runtime/src/ompt-specific.c b/runtime/src/ompt-specific.c
+index 49f668a..506b282 100644
+--- a/runtime/src/ompt-specific.c
++++ b/runtime/src/ompt-specific.c
+@@ -257,8 +257,8 @@ __ompt_lw_taskteam_init(ompt_lw_taskteam_t *lwt, kmp_info_t *thr,
+     lwt->ompt_team_info.parallel_id = ompt_pid;
+     lwt->ompt_team_info.microtask = microtask;
+     lwt->ompt_task_info.task_id = 0;
+-    lwt->ompt_task_info.frame.reenter_runtime_frame = 0;
+-    lwt->ompt_task_info.frame.exit_runtime_frame = 0;
++    lwt->ompt_task_info.frame.reenter_runtime_frame = NULL;
++    lwt->ompt_task_info.frame.exit_runtime_frame = NULL;
+     lwt->ompt_task_info.function = NULL;
+     lwt->parent = 0;
+ }
+diff --git a/runtime/test/ompt/parallel/nested.c b/runtime/test/ompt/parallel/nested.c
+index 8b94d29..63c5c4f 100644
+--- a/runtime/test/ompt/parallel/nested.c
++++ b/runtime/test/ompt/parallel/nested.c
+@@ -7,16 +7,22 @@
+ int main()
+ {
+   omp_set_nested(1);
++  print_frame(0);
+ 
+   #pragma omp parallel num_threads(4)
+   {
++    print_frame(1);
+     print_ids(0);
+     print_ids(1);
++    print_frame(0);
+     #pragma omp parallel num_threads(4)
+     {
++      print_frame(1);
+       print_ids(0);
+       print_ids(1);
+       print_ids(2);
++      print_frame(0);
++      #pragma omp barrier
+     }
+   }
+ 
+@@ -40,18 +46,23 @@ int main()
+   // CHECK: {{^}}[[MASTER_ID]]: ompt_event_parallel_end: parallel_id=[[PARALLEL_ID]], task_id=[[PARENT_TASK_ID]], invoker=[[PARALLEL_INVOKER]]
+ 
+ 
+-  // THREADS: 0: NULL_POINTER=[[NULL:.*$]]
+-  // THREADS: {{^}}[[MASTER_ID:[0-9]+]]: ompt_event_parallel_begin: parent_task_id=[[PARENT_TASK_ID:[0-9]+]], parent_task_frame.exit=[[NULL]], parent_task_frame.reenter={{0x[0-f]+}}, parallel_id=[[PARALLEL_ID:[0-9]+]], requested_team_size=4, parallel_function=0x{{[0-f]+}}, invoker=[[PARALLEL_INVOKER:.+]]
++  // THREADS: {{^}}0: NULL_POINTER=[[NULL:.*$]]
++  // THREADS: {{^}}[[MASTER_ID:[0-9]+]]: __builtin_frame_address(0)=[[MAIN_REENTER:0x[0-f]+]]
++  // THREADS: {{^}}[[MASTER_ID]]: ompt_event_parallel_begin: parent_task_id=[[PARENT_TASK_ID:[0-9]+]], parent_task_frame.exit=[[NULL]], parent_task_frame.reenter=[[MAIN_REENTER]], parallel_id=[[PARALLEL_ID:[0-9]+]], requested_team_size=4, parallel_function=0x{{[0-f]+}}, invoker=[[PARALLEL_INVOKER:.+]]
+ 
+   // nested parallel masters
+   // THREADS: {{^}}[[MASTER_ID]]: ompt_event_implicit_task_begin: parallel_id=[[PARALLEL_ID]], task_id=[[IMPLICIT_TASK_ID:[0-9]+]]
+-  // THREADS: {{^}}[[MASTER_ID]]: level 0: parallel_id=[[PARALLEL_ID]], task_id=[[IMPLICIT_TASK_ID]]
+-  // THREADS: {{^}}[[MASTER_ID]]: level 1: parallel_id=0, task_id=[[PARENT_TASK_ID]]
+-  // THREADS: {{^}}[[MASTER_ID]]: ompt_event_parallel_begin: parent_task_id=[[IMPLICIT_TASK_ID]], parent_task_frame.exit={{0x[0-f]+}}, parent_task_frame.reenter={{0x[0-f]+}}, parallel_id=[[NESTED_PARALLEL_ID:[0-9]+]], requested_team_size=4, parallel_function=[[NESTED_PARALLEL_FUNCTION:0x[0-f]+]], invoker=[[PARALLEL_INVOKER]]
++  // THREADS: {{^}}[[MASTER_ID]]: __builtin_frame_address(1)=[[EXIT:0x[0-f]+]]
++  // THREADS: {{^}}[[MASTER_ID]]: level 0: parallel_id=[[PARALLEL_ID]], task_id=[[IMPLICIT_TASK_ID]], exit_frame=[[EXIT]], reenter_frame=[[NULL]]
++  // THREADS: {{^}}[[MASTER_ID]]: level 1: parallel_id=0, task_id=[[PARENT_TASK_ID]], exit_frame=[[NULL]], reenter_frame=[[MAIN_REENTER]]
++  // THREADS: {{^}}[[MASTER_ID]]: __builtin_frame_address(0)=[[REENTER:0x[0-f]+]]
++  // THREADS: {{^}}[[MASTER_ID]]: ompt_event_parallel_begin: parent_task_id=[[IMPLICIT_TASK_ID]], parent_task_frame.exit=[[EXIT]], parent_task_frame.reenter=[[REENTER]], parallel_id=[[NESTED_PARALLEL_ID:[0-9]+]], requested_team_size=4, parallel_function=[[NESTED_PARALLEL_FUNCTION:0x[0-f]+]], invoker=[[PARALLEL_INVOKER]]
+   // THREADS: {{^}}[[MASTER_ID]]: ompt_event_implicit_task_begin: parallel_id=[[NESTED_PARALLEL_ID]], task_id=[[NESTED_IMPLICIT_TASK_ID:[0-9]+]]
+-  // THREADS: {{^}}[[MASTER_ID]]: level 0: parallel_id=[[NESTED_PARALLEL_ID]], task_id=[[NESTED_IMPLICIT_TASK_ID]]
+-  // THREADS: {{^}}[[MASTER_ID]]: level 1: parallel_id=[[PARALLEL_ID]], task_id=[[IMPLICIT_TASK_ID]]
+-  // THREADS: {{^}}[[MASTER_ID]]: level 2: parallel_id=0, task_id=[[PARENT_TASK_ID]]
++  // THREADS: {{^}}[[MASTER_ID]]: __builtin_frame_address(1)=[[NESTED_EXIT:0x[0-f]+]]
++  // THREADS: {{^}}[[MASTER_ID]]: level 0: parallel_id=[[NESTED_PARALLEL_ID]], task_id=[[NESTED_IMPLICIT_TASK_ID]], exit_frame=[[NESTED_EXIT]], reenter_frame=[[NULL]]
++  // THREADS: {{^}}[[MASTER_ID]]: level 1: parallel_id=[[PARALLEL_ID]], task_id=[[IMPLICIT_TASK_ID]], exit_frame=[[EXIT]], reenter_frame=[[REENTER]]
++  // THREADS: {{^}}[[MASTER_ID]]: level 2: parallel_id=0, task_id=[[PARENT_TASK_ID]], exit_frame=[[NULL]], reenter_frame=[[MAIN_REENTER]]
++  // THREADS: {{^}}[[MASTER_ID]]: __builtin_frame_address(0)=[[NESTED_REENTER:0x[0-f]+]]
+   // THREADS-NOT: {{^}}[[MASTER_ID]]: ompt_event_implicit_task_end
+   // THREADS: {{^}}[[MASTER_ID]]: ompt_event_barrier_begin: parallel_id=[[NESTED_PARALLEL_ID]], task_id=[[NESTED_IMPLICIT_TASK_ID]]
+   // THREADS: {{^}}[[MASTER_ID]]: ompt_event_barrier_end: parallel_id=[[NESTED_PARALLEL_ID]], task_id=[[NESTED_IMPLICIT_TASK_ID]]
+-- 
+2.7.3
+

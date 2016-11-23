@@ -1,0 +1,44 @@
+From a92421e813aacdf1c724088212cc71a1964636b9 Mon Sep 17 00:00:00 2001
+From: Andrey Churbanov <Andrey.Churbanov@intel.com>
+Date: Thu, 20 Oct 2016 17:14:17 +0000
+Subject: [PATCH 42/55] Fixed memory leak mistakenly introduced by
+ https://reviews.llvm.org/D23115
+
+Differential Revision: http://reviews.llvm.org/D25510
+
+
+git-svn-id: https://llvm.org/svn/llvm-project/openmp/trunk@284747 91177308-0d34-0410-b5e6-96231b3b80d8
+---
+ runtime/src/kmp_tasking.c | 8 +++++---
+ 1 file changed, 5 insertions(+), 3 deletions(-)
+
+diff --git a/runtime/src/kmp_tasking.c b/runtime/src/kmp_tasking.c
+index 7a74267..60efc1d 100644
+--- a/runtime/src/kmp_tasking.c
++++ b/runtime/src/kmp_tasking.c
+@@ -579,9 +579,11 @@ __kmp_free_task_and_ancestors( kmp_int32 gtid, kmp_taskdata_t * taskdata, kmp_in
+ #if OMP_45_ENABLED
+     // Proxy tasks must always be allowed to free their parents
+     // because they can be run in background even in serial mode.
+-    kmp_int32 task_serial = taskdata->td_flags.task_serial && !taskdata->td_flags.proxy;
++    kmp_int32 team_serial = ( taskdata->td_flags.team_serial ||
++        taskdata->td_flags.tasking_ser ) && !taskdata->td_flags.proxy;
+ #else
+-    kmp_int32 task_serial = taskdata->td_flags.task_serial;
++    kmp_int32 team_serial = taskdata->td_flags.team_serial ||
++        taskdata->td_flags.tasking_ser;
+ #endif
+     KMP_DEBUG_ASSERT( taskdata -> td_flags.tasktype == TASK_EXPLICIT );
+ 
+@@ -603,7 +605,7 @@ __kmp_free_task_and_ancestors( kmp_int32 gtid, kmp_taskdata_t * taskdata, kmp_in
+ 
+         // Stop checking ancestors at implicit task
+         // instead of walking up ancestor tree to avoid premature deallocation of ancestors.
+-        if ( task_serial || taskdata -> td_flags.tasktype == TASK_IMPLICIT )
++        if ( team_serial || taskdata -> td_flags.tasktype == TASK_IMPLICIT )
+             return;
+ 
+         // Predecrement simulated by "- 1" calculation
+-- 
+2.7.3
+

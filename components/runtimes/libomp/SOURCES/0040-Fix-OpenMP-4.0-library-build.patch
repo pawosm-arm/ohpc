@@ -1,0 +1,55 @@
+From 550c02171584ecf0e8753cdaa5b20008bfc114f2 Mon Sep 17 00:00:00 2001
+From: Jonathan Peyton <jonathan.l.peyton@intel.com>
+Date: Tue, 18 Oct 2016 17:39:06 +0000
+Subject: [PATCH 40/55] Fix OpenMP 4.0 library build
+
+Patch by Andrey Churbanov
+
+Differential Revision: https://reviews.llvm.org/D25505
+
+
+git-svn-id: https://llvm.org/svn/llvm-project/openmp/trunk@284499 91177308-0d34-0410-b5e6-96231b3b80d8
+---
+ runtime/src/kmp.h         | 5 +++++
+ runtime/src/kmp_tasking.c | 4 ++++
+ 2 files changed, 9 insertions(+)
+
+diff --git a/runtime/src/kmp.h b/runtime/src/kmp.h
+index eff3c93..6766fd5 100644
+--- a/runtime/src/kmp.h
++++ b/runtime/src/kmp.h
+@@ -1746,8 +1746,13 @@ typedef struct kmp_disp {
+         kmp_lock_t          *th_steal_lock;       // lock used for chunk stealing (8-byte variable)
+     };
+ #else
++#if KMP_STATIC_STEAL_ENABLED
++    kmp_lock_t              *th_steal_lock;       // lock used for chunk stealing (8-byte variable)
++    void* dummy_padding[1]; // make it 64 bytes on Intel(R) 64
++#else
+     void* dummy_padding[2]; // make it 64 bytes on Intel(R) 64
+ #endif
++#endif
+ #if KMP_USE_INTERNODE_ALIGNMENT
+     char more_padding[INTERNODE_CACHE_LINE];
+ #endif
+diff --git a/runtime/src/kmp_tasking.c b/runtime/src/kmp_tasking.c
+index 0c806c2..7a74267 100644
+--- a/runtime/src/kmp_tasking.c
++++ b/runtime/src/kmp_tasking.c
+@@ -576,9 +576,13 @@ __kmp_free_task( kmp_int32 gtid, kmp_taskdata_t * taskdata, kmp_info_t * thread
+ static void
+ __kmp_free_task_and_ancestors( kmp_int32 gtid, kmp_taskdata_t * taskdata, kmp_info_t * thread )
+ {
++#if OMP_45_ENABLED
+     // Proxy tasks must always be allowed to free their parents
+     // because they can be run in background even in serial mode.
+     kmp_int32 task_serial = taskdata->td_flags.task_serial && !taskdata->td_flags.proxy;
++#else
++    kmp_int32 task_serial = taskdata->td_flags.task_serial;
++#endif
+     KMP_DEBUG_ASSERT( taskdata -> td_flags.tasktype == TASK_EXPLICIT );
+ 
+     kmp_int32 children = KMP_TEST_THEN_DEC32( (kmp_int32 *)(& taskdata -> td_allocated_child_tasks) ) - 1;
+-- 
+2.7.3
+

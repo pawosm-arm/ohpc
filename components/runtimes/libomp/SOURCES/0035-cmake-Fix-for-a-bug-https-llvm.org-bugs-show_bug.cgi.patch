@@ -1,0 +1,35 @@
+From af29aaac46dfeea0a92493fe356dcd45648eb76f Mon Sep 17 00:00:00 2001
+From: Paul Osmialowski <pawel.osmialowski@arm.com>
+Date: Fri, 30 Sep 2016 22:05:45 +0000
+Subject: [PATCH 35/55] [cmake] Fix for a bug
+ https://llvm.org/bugs/show_bug.cgi?id=30489 "Cannot build with
+ -DLIBOMP_FORTRAN_MODULES=True"
+
+Differential Revision: https://reviews.llvm.org/D24959
+
+git-svn-id: https://llvm.org/svn/llvm-project/openmp/trunk@282965 91177308-0d34-0410-b5e6-96231b3b80d8
+---
+ runtime/cmake/LibompExports.cmake | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/runtime/cmake/LibompExports.cmake b/runtime/cmake/LibompExports.cmake
+index fd0397e..cda3159 100644
+--- a/runtime/cmake/LibompExports.cmake
++++ b/runtime/cmake/LibompExports.cmake
+@@ -64,10 +64,12 @@ endif()
+ if(${LIBOMP_FORTRAN_MODULES})
+   add_custom_command(TARGET libomp-mod POST_BUILD
+     COMMAND ${CMAKE_COMMAND} -E make_directory ${LIBOMP_EXPORTS_MOD_DIR}
+-    COMMAND ${CMAKE_COMMAND} -E copy omp_lib.h ${LIBOMP_EXPORTS_CMN_DIR}
+     COMMAND ${CMAKE_COMMAND} -E copy omp_lib.mod ${LIBOMP_EXPORTS_MOD_DIR}
+     COMMAND ${CMAKE_COMMAND} -E copy omp_lib_kinds.mod ${LIBOMP_EXPORTS_MOD_DIR}
+   )
++  add_custom_command(TARGET omp POST_BUILD
++    COMMAND ${CMAKE_COMMAND} -E copy omp_lib.h ${LIBOMP_EXPORTS_CMN_DIR}
++  )
+ endif()
+ 
+ # Copy OpenMP library into exports/ directory post build
+-- 
+2.7.3
+

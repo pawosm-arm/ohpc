@@ -1,0 +1,38 @@
+From 78d420b46afb1c319159cb4cd4b1a5a2b473d32a Mon Sep 17 00:00:00 2001
+From: Pirama Arumuga Nainar <pirama@google.com>
+Date: Wed, 3 Aug 2016 18:08:57 +0000
+Subject: [PATCH 03/55] Disable KMP_CANCEL_THREADS on Android
+
+Summary:
+Android does not have pthread_cancel.  Disable KMP_CANCEL_THREADS if
+__ANDROID__ is defined.
+
+Subscribers: tberghammer, srhines, openmp-commits, danalbert
+
+Differential Revision: https://reviews.llvm.org/D23029
+
+git-svn-id: https://llvm.org/svn/llvm-project/openmp/trunk@277618 91177308-0d34-0410-b5e6-96231b3b80d8
+---
+ runtime/src/kmp.h | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/runtime/src/kmp.h b/runtime/src/kmp.h
+index 6fc378b..2ec0141 100644
+--- a/runtime/src/kmp.h
++++ b/runtime/src/kmp.h
+@@ -55,6 +55,12 @@
+ #define KMP_CANCEL_THREADS
+ #define KMP_THREAD_ATTR
+ 
++// Android does not have pthread_cancel.  Undefine KMP_CANCEL_THREADS if being
++// built on Android
++#if defined(__ANDROID__)
++#undef KMP_CANCEL_THREADS
++#endif
++
+ #include <stdio.h>
+ #include <stdlib.h>
+ #include <stddef.h>
+-- 
+2.7.3
+

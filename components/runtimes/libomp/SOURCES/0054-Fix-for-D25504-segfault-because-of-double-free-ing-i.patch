@@ -1,0 +1,42 @@
+From 36b1103f950e4c907bc85494384189d68dcea01d Mon Sep 17 00:00:00 2001
+From: Jonathan Peyton <jonathan.l.peyton@intel.com>
+Date: Mon, 21 Nov 2016 16:18:57 +0000
+Subject: [PATCH 54/55] Fix for D25504 - segfault because of double free()-ing
+ in shutdown code.
+
+Paul Osmialowski pointed out a double free bug in shutdown code.  This patch
+Moves the freeing of the implicit task to above the freeing of all fast memory
+to prevent the double-free issue.
+
+Differential Revision: https://reviews.llvm.org/D26860
+
+
+git-svn-id: https://llvm.org/svn/llvm-project/openmp/trunk@287551 91177308-0d34-0410-b5e6-96231b3b80d8
+---
+ runtime/src/kmp_runtime.c | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/runtime/src/kmp_runtime.c b/runtime/src/kmp_runtime.c
+index c875f58..da602d9 100644
+--- a/runtime/src/kmp_runtime.c
++++ b/runtime/src/kmp_runtime.c
+@@ -5707,6 +5707,8 @@ __kmp_reap_thread(
+         --__kmp_thread_pool_nth;
+     }; // if
+ 
++    __kmp_free_implicit_task(thread);
++
+     // Free the fast memory for tasking
+     #if USE_FAST_MEMORY
+         __kmp_free_fast_memory( thread );
+@@ -5762,7 +5764,6 @@ __kmp_reap_thread(
+     }; // if
+ #endif /* KMP_AFFINITY_SUPPORTED */
+ 
+-    __kmp_free_implicit_task(thread);
+     __kmp_reap_team( thread->th.th_serial_team );
+     thread->th.th_serial_team = NULL;
+     __kmp_free( thread );
+-- 
+2.7.3
+

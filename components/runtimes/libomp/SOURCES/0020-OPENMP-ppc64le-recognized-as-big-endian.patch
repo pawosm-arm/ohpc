@@ -1,0 +1,32 @@
+From a24629dfeb9dc899991167420fd054558d90ff03 Mon Sep 17 00:00:00 2001
+From: George Rokos <grokos@us.ibm.com>
+Date: Fri, 9 Sep 2016 18:04:23 +0000
+Subject: [PATCH 20/55] [OPENMP] ppc64le recognized as big-endian
+
+There is a bug in CMakeLists which causes powerpc64le systems to be recognized as big-endian. This patch fixes the issue.
+
+Differential Revision: https://reviews.llvm.org/D23626
+
+
+
+git-svn-id: https://llvm.org/svn/llvm-project/openmp/trunk@281068 91177308-0d34-0410-b5e6-96231b3b80d8
+---
+ runtime/CMakeLists.txt | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/runtime/CMakeLists.txt b/runtime/CMakeLists.txt
+index 77599f5..9db058b 100644
+--- a/runtime/CMakeLists.txt
++++ b/runtime/CMakeLists.txt
+@@ -65,6 +65,8 @@ else() # Part of LLVM build
+     set(LIBOMP_ARCH x86_64)
+   elseif(LIBOMP_NATIVE_ARCH STREQUAL "x86_64")
+     set(LIBOMP_ARCH x86_64)
++  elseif(LIBOMP_NATIVE_ARCH MATCHES "powerpc64le")
++    set(LIBOMP_ARCH ppc64le)
+   elseif(LIBOMP_NATIVE_ARCH MATCHES "powerpc")
+     set(LIBOMP_ARCH ppc64)
+   elseif(LIBOMP_NATIVE_ARCH MATCHES "aarch64")
+-- 
+2.7.3
+

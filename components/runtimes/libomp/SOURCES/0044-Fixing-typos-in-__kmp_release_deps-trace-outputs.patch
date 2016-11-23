@@ -1,0 +1,56 @@
+From 2591774d31699bc9dbf31a82787d85974b0b94be Mon Sep 17 00:00:00 2001
+From: Jonathan Peyton <jonathan.l.peyton@intel.com>
+Date: Wed, 26 Oct 2016 21:46:43 +0000
+Subject: [PATCH 44/55] Fixing typos in __kmp_release_deps trace outputs
+
+Patch by Victor Campos
+
+Differential Revision: https://reviews.llvm.org/D25972
+
+
+git-svn-id: https://llvm.org/svn/llvm-project/openmp/trunk@285244 91177308-0d34-0410-b5e6-96231b3b80d8
+---
+ runtime/src/kmp_taskdeps.cpp | 8 ++++----
+ 1 file changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/runtime/src/kmp_taskdeps.cpp b/runtime/src/kmp_taskdeps.cpp
+index 76cd7bc..7e60ce8 100644
+--- a/runtime/src/kmp_taskdeps.cpp
++++ b/runtime/src/kmp_taskdeps.cpp
+@@ -368,13 +368,13 @@ __kmp_release_deps ( kmp_int32 gtid, kmp_taskdata_t *task )
+     kmp_depnode_t *node = task->td_depnode;
+ 
+     if ( task->td_dephash ) {
+-        KA_TRACE(40, ("__kmp_realease_deps: T#%d freeing dependencies hash of task %p.\n", gtid, task ) );
++        KA_TRACE(40, ("__kmp_release_deps: T#%d freeing dependencies hash of task %p.\n", gtid, task ) );
+         __kmp_dephash_free(thread,task->td_dephash);
+     }
+ 
+     if ( !node ) return;
+ 
+-    KA_TRACE(20, ("__kmp_realease_deps: T#%d notifying succesors of task %p.\n", gtid, task ) );
++    KA_TRACE(20, ("__kmp_release_deps: T#%d notifying successors of task %p.\n", gtid, task ) );
+ 
+     KMP_ACQUIRE_DEPNODE(gtid,node);
+     node->dn.task = NULL; // mark this task as finished, so no new dependencies are generated
+@@ -389,7 +389,7 @@ __kmp_release_deps ( kmp_int32 gtid, kmp_taskdata_t *task )
+         if ( npredecessors == 0 ) {
+             KMP_MB();
+             if ( successor->dn.task ) {
+-                KA_TRACE(20, ("__kmp_realease_deps: T#%d successor %p of %p scheduled for execution.\n", gtid, successor->dn.task, task ) );
++                KA_TRACE(20, ("__kmp_release_deps: T#%d successor %p of %p scheduled for execution.\n", gtid, successor->dn.task, task ) );
+                 __kmp_omp_task(gtid,successor->dn.task,false);
+             }
+         }
+@@ -405,7 +405,7 @@ __kmp_release_deps ( kmp_int32 gtid, kmp_taskdata_t *task )
+ 
+     __kmp_node_deref(thread,node);
+ 
+-    KA_TRACE(20, ("__kmp_realease_deps: T#%d all successors of %p notified of completation\n", gtid, task ) );
++    KA_TRACE(20, ("__kmp_release_deps: T#%d all successors of %p notified of completion\n", gtid, task ) );
+ }
+ 
+ /*!
+-- 
+2.7.3
+

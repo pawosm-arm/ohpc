@@ -1,0 +1,57 @@
+From 03a057fa63e6f59cab6180bdf530558516c9da8d Mon Sep 17 00:00:00 2001
+From: Jonas Hahnfeld <Hahnfeld@itc.rwth-aachen.de>
+Date: Thu, 4 Aug 2016 14:55:56 +0000
+Subject: [PATCH 05/55] Add test case for nested creation of tasks
+
+For discussion in D23115
+
+git-svn-id: https://llvm.org/svn/llvm-project/openmp/trunk@277730 91177308-0d34-0410-b5e6-96231b3b80d8
+---
+ runtime/test/tasking/nested_task_creation.c | 35 +++++++++++++++++++++++++++++
+ 1 file changed, 35 insertions(+)
+ create mode 100644 runtime/test/tasking/nested_task_creation.c
+
+diff --git a/runtime/test/tasking/nested_task_creation.c b/runtime/test/tasking/nested_task_creation.c
+new file mode 100644
+index 0000000..c7c25fc
+--- /dev/null
++++ b/runtime/test/tasking/nested_task_creation.c
+@@ -0,0 +1,35 @@
++// RUN: %libomp-compile-and-run
++#include <stdio.h>
++#include <omp.h>
++#include "omp_my_sleep.h"
++
++/*
++ * This test creates tasks that themselves create a new task.
++ * The runtime has to take care that they are correctly freed.
++ */
++
++int main()
++{
++  #pragma omp task
++  {
++    #pragma omp task
++    {
++      my_sleep( 0.1 );
++    }
++  }
++
++  #pragma omp parallel num_threads(2)
++  {
++    #pragma omp single
++    #pragma omp task
++    {
++      #pragma omp task
++      {
++        my_sleep( 0.1 );
++      }
++    }
++  }
++
++  printf("pass\n");
++  return 0;
++}
+-- 
+2.7.3
+

@@ -1,0 +1,92 @@
+From 3a587a8c430bd8320cc0ca2b5f2f7c519949f60d Mon Sep 17 00:00:00 2001
+From: Jonathan Peyton <jonathan.l.peyton@intel.com>
+Date: Fri, 2 Sep 2016 18:29:45 +0000
+Subject: [PATCH 15/55] Use 'critical' reduction method when 'atomic' is not
+ available but requested.
+
+In case atomic reduction method is not available (the compiler can't generate
+it) the assertion failure occurred if KMP_FORCE_REDUCTION=atomic was specified.
+This change replaces the assertion with a warning and sets the reduction method
+to the default one - 'critical'.
+
+Patch by Olga Malysheva
+
+Differential Revision: https://reviews.llvm.org/D23990
+
+
+git-svn-id: https://llvm.org/svn/llvm-project/openmp/trunk@280519 91177308-0d34-0410-b5e6-96231b3b80d8
+---
+ runtime/src/i18n/en_US.txt |  3 ++-
+ runtime/src/kmp_runtime.c  | 21 ++++++++++++++-------
+ 2 files changed, 16 insertions(+), 8 deletions(-)
+
+diff --git a/runtime/src/i18n/en_US.txt b/runtime/src/i18n/en_US.txt
+index ffa2a6b..ce09e16 100644
+--- a/runtime/src/i18n/en_US.txt
++++ b/runtime/src/i18n/en_US.txt
+@@ -38,7 +38,7 @@ Language "English"
+ Country  "USA"
+ LangId   "1033"
+ Version  "2"
+-Revision "20160405"
++Revision "20160714"
+ 
+ 
+ 
+@@ -410,6 +410,7 @@ AffIgnoringHwloc             "%1$s: Ignoring hwloc mechanism."
+ AffHwlocErrorOccurred        "%1$s: Hwloc failed in %2$s. Relying on internal affinity mechanisms."
+ EnvSerialWarn                "%1$s must be set prior to OpenMP runtime library initialization; ignored."
+ EnvVarDeprecated             "%1$s variable deprecated, please use %2$s instead."
++RedMethodNotSupported        "KMP_FORCE_REDUCTION: %1$s method is not supported; using critical."
+ 
+ 
+ # --------------------------------------------------------------------------------------------------
+diff --git a/runtime/src/kmp_runtime.c b/runtime/src/kmp_runtime.c
+index 7b2ef06..0e20e7b 100644
+--- a/runtime/src/kmp_runtime.c
++++ b/runtime/src/kmp_runtime.c
+@@ -7585,27 +7585,34 @@ __kmp_determine_reduction_method( ident_t *loc, kmp_int32 global_tid,
+     // method and stay with the unsynchronized method (empty_reduce_block)
+     if( __kmp_force_reduction_method != reduction_method_not_defined && team_size != 1) {
+ 
+-        PACKED_REDUCTION_METHOD_T forced_retval;
++        PACKED_REDUCTION_METHOD_T forced_retval = critical_reduce_block;
+ 
+         int atomic_available, tree_available;
+ 
+         switch( ( forced_retval = __kmp_force_reduction_method ) )
+         {
+-            case critical_reduce_block:
++        case critical_reduce_block:
+                 KMP_ASSERT( lck );              // lck should be != 0
+                 break;
+ 
+             case atomic_reduce_block:
+                 atomic_available = FAST_REDUCTION_ATOMIC_METHOD_GENERATED;
+-                KMP_ASSERT( atomic_available ); // atomic_available should be != 0
++                if( ! atomic_available ) {
++                    KMP_WARNING(RedMethodNotSupported, "atomic");
++                    forced_retval = critical_reduce_block;
++                }
+                 break;
+ 
+             case tree_reduce_block:
+                 tree_available = FAST_REDUCTION_TREE_METHOD_GENERATED;
+-                KMP_ASSERT( tree_available );   // tree_available should be != 0
+-                #if KMP_FAST_REDUCTION_BARRIER
+-                forced_retval = TREE_REDUCE_BLOCK_WITH_REDUCTION_BARRIER;
+-                #endif
++                if( ! tree_available ) {
++                    KMP_WARNING(RedMethodNotSupported, "tree");
++                    forced_retval = critical_reduce_block;
++                } else {
++                    #if KMP_FAST_REDUCTION_BARRIER
++                    forced_retval = TREE_REDUCE_BLOCK_WITH_REDUCTION_BARRIER;
++                    #endif
++                }
+                 break;
+ 
+             default:
+-- 
+2.7.3
+

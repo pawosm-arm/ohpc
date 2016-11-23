@@ -1,0 +1,121 @@
+From bf6a88004a5c06b08c64e6e523ca963777c32c27 Mon Sep 17 00:00:00 2001
+From: Jonathan Peyton <jonathan.l.peyton@intel.com>
+Date: Mon, 12 Sep 2016 19:02:53 +0000
+Subject: [PATCH 21/55] Fix bitmask upper bounds check
+
+Rather than checking KMP_CPU_SETSIZE, which doesn't exist when using Hwloc, we
+use the get_max_proc() function which can vary based on the operating system.
+For example on Windows with multiple processor groups, it might be the case that
+the highest bit possible in the bitmask is not equal to the number of hardware
+threads on the machine but something higher than that.
+
+Differential Revision: https://reviews.llvm.org/D24206
+
+
+git-svn-id: https://llvm.org/svn/llvm-project/openmp/trunk@281245 91177308-0d34-0410-b5e6-96231b3b80d8
+---
+ runtime/src/kmp.h            |  1 +
+ runtime/src/kmp_affinity.cpp | 31 ++++++++++++++++---------------
+ runtime/src/kmp_ftn_entry.h  | 11 +----------
+ 3 files changed, 18 insertions(+), 25 deletions(-)
+
+diff --git a/runtime/src/kmp.h b/runtime/src/kmp.h
+index 88e288b..60ae316 100644
+--- a/runtime/src/kmp.h
++++ b/runtime/src/kmp.h
+@@ -3170,6 +3170,7 @@ extern void __kmp_affinity_set_place(int gtid);
+ extern void __kmp_affinity_determine_capable( const char *env_var );
+ extern int __kmp_aux_set_affinity(void **mask);
+ extern int __kmp_aux_get_affinity(void **mask);
++extern int __kmp_aux_get_affinity_max_proc();
+ extern int __kmp_aux_set_affinity_mask_proc(int proc, void **mask);
+ extern int __kmp_aux_unset_affinity_mask_proc(int proc, void **mask);
+ extern int __kmp_aux_get_affinity_mask_proc(int proc, void **mask);
+diff --git a/runtime/src/kmp_affinity.cpp b/runtime/src/kmp_affinity.cpp
+index 251ee0c..93299b5 100644
+--- a/runtime/src/kmp_affinity.cpp
++++ b/runtime/src/kmp_affinity.cpp
+@@ -4534,6 +4534,19 @@ __kmp_aux_get_affinity(void **mask)
+ }
+ 
+ int
++__kmp_aux_get_affinity_max_proc() {
++    if (!  KMP_AFFINITY_CAPABLE()) {
++        return 0;
++    }
++#if KMP_GROUP_AFFINITY
++    if ( __kmp_num_proc_groups > 1 ) {
++        return (int)(__kmp_num_proc_groups*sizeof(DWORD_PTR)*CHAR_BIT);
++    }
++#endif
++    return __kmp_xproc;
++}
++
++int
+ __kmp_aux_set_affinity_mask_proc(int proc, void **mask)
+ {
+     int retval;
+@@ -4557,11 +4570,7 @@ __kmp_aux_set_affinity_mask_proc(int proc, void **mask)
+         }
+     }
+ 
+-    if ((proc < 0)
+-# if !KMP_USE_HWLOC
+-         || ((unsigned)proc >= KMP_CPU_SETSIZE)
+-# endif
+-       ) {
++    if ((proc < 0) || (proc >= __kmp_aux_get_affinity_max_proc())) {
+         return -1;
+     }
+     if (! KMP_CPU_ISSET(proc, __kmp_affin_fullMask)) {
+@@ -4597,11 +4606,7 @@ __kmp_aux_unset_affinity_mask_proc(int proc, void **mask)
+         }
+     }
+ 
+-    if ((proc < 0)
+-# if !KMP_USE_HWLOC
+-         || ((unsigned)proc >= KMP_CPU_SETSIZE)
+-# endif
+-       ) {
++    if ((proc < 0) || (proc >= __kmp_aux_get_affinity_max_proc())) {
+         return -1;
+     }
+     if (! KMP_CPU_ISSET(proc, __kmp_affin_fullMask)) {
+@@ -4637,11 +4642,7 @@ __kmp_aux_get_affinity_mask_proc(int proc, void **mask)
+         }
+     }
+ 
+-    if ((proc < 0)
+-# if !KMP_USE_HWLOC
+-         || ((unsigned)proc >= KMP_CPU_SETSIZE)
+-# endif
+-       ) {
++    if ((proc < 0) || (proc >= __kmp_aux_get_affinity_max_proc())) {
+         return -1;
+     }
+     if (! KMP_CPU_ISSET(proc, __kmp_affin_fullMask)) {
+diff --git a/runtime/src/kmp_ftn_entry.h b/runtime/src/kmp_ftn_entry.h
+index 7ad15e3..8f58b52 100644
+--- a/runtime/src/kmp_ftn_entry.h
++++ b/runtime/src/kmp_ftn_entry.h
+@@ -266,16 +266,7 @@ FTN_GET_AFFINITY_MAX_PROC( void )
+         if ( ! TCR_4(__kmp_init_middle) ) {
+             __kmp_middle_initialize();
+         }
+-        if ( ! ( KMP_AFFINITY_CAPABLE() ) ) {
+-            return 0;
+-        }
+-
+-    #if KMP_GROUP_AFFINITY
+-        if ( __kmp_num_proc_groups > 1 ) {
+-            return (int)(__kmp_num_proc_groups*sizeof(DWORD_PTR)*CHAR_BIT);
+-        }
+-    #endif /* KMP_GROUP_AFFINITY */
+-        return __kmp_xproc;
++        return __kmp_aux_get_affinity_max_proc();
+     #endif
+ }
+ 
+-- 
+2.7.3
+

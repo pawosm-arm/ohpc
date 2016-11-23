@@ -1,0 +1,41 @@
+From ae791ee6a52403b2ecd709fdd78c4bfa5505a48c Mon Sep 17 00:00:00 2001
+From: Andrey Churbanov <Andrey.Churbanov@intel.com>
+Date: Tue, 1 Nov 2016 08:33:36 +0000
+Subject: [PATCH 46/55] Add more conditions to check whether task waiting is
+ necessary in kmp_omp_taskwait.
+
+Differential Revision: https://reviews.llvm.org/D26058
+
+Patch by Victor Campos
+
+
+git-svn-id: https://llvm.org/svn/llvm-project/openmp/trunk@285678 91177308-0d34-0410-b5e6-96231b3b80d8
+---
+ runtime/src/kmp_tasking.c | 8 ++++----
+ 1 file changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/runtime/src/kmp_tasking.c b/runtime/src/kmp_tasking.c
+index 888a3f3..d3fcba8 100644
+--- a/runtime/src/kmp_tasking.c
++++ b/runtime/src/kmp_tasking.c
+@@ -1480,13 +1480,13 @@ __kmpc_omp_taskwait( ident_t *loc_ref, kmp_int32 gtid )
+             __kmp_itt_taskwait_starting( gtid, itt_sync_obj );
+ #endif /* USE_ITT_BUILD */
+ 
++        bool must_wait = ! taskdata->td_flags.team_serial && ! taskdata->td_flags.final;
++
+ #if OMP_45_ENABLED
+-        if ( ! taskdata->td_flags.team_serial || (thread->th.th_task_team != NULL && thread->th.th_task_team->tt.tt_found_proxy_tasks) )
+-#else
+-        if ( ! taskdata->td_flags.team_serial )
++        must_wait = must_wait || (thread->th.th_task_team != NULL && thread->th.th_task_team->tt.tt_found_proxy_tasks);
+ #endif
++        if (must_wait)
+         {
+-            // GEH: if team serialized, avoid reading the volatile variable below.
+             kmp_flag_32 flag(&(taskdata->td_incomplete_child_tasks), 0U);
+             while ( TCR_4(taskdata -> td_incomplete_child_tasks) != 0 ) {
+                 flag.execute_tasks(thread, gtid, FALSE, &thread_finished
+-- 
+2.7.3
+

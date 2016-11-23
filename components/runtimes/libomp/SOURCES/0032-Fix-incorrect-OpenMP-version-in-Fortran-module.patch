@@ -1,0 +1,70 @@
+From 8ff412c00e66bd4d5af1c1870ff028b2c4fef6bc Mon Sep 17 00:00:00 2001
+From: Jonathan Peyton <jonathan.l.peyton@intel.com>
+Date: Fri, 30 Sep 2016 15:50:14 +0000
+Subject: [PATCH 32/55] Fix incorrect OpenMP version in Fortran module.
+
+Add check for "45" version to use "201511" string for OpenMP 4.5,
+otherwise "200505" is used in Fortran module. Also, fix kmp_openmp_version
+variable (used for the debugger, e.g.) and kmp_version_omp_api that is used
+in KMP_VERSION=1 output.
+
+Patch by Olga Malysheva
+
+Differential Revision: https://reviews.llvm.org/D24761
+
+
+git-svn-id: https://llvm.org/svn/llvm-project/openmp/trunk@282868 91177308-0d34-0410-b5e6-96231b3b80d8
+---
+ runtime/CMakeLists.txt    | 4 +++-
+ runtime/src/kmp_runtime.c | 4 +++-
+ runtime/src/kmp_version.c | 4 +++-
+ 3 files changed, 9 insertions(+), 3 deletions(-)
+
+diff --git a/runtime/CMakeLists.txt b/runtime/CMakeLists.txt
+index e8e9a74..096f222 100644
+--- a/runtime/CMakeLists.txt
++++ b/runtime/CMakeLists.txt
+@@ -96,7 +96,9 @@ if(LIBOMP_OMP_VERSION EQUAL 41)
+ endif()
+ libomp_check_variable(LIBOMP_OMP_VERSION 45 40 30)
+ # Set the OpenMP Year and Month assiociated with version
+-if(${LIBOMP_OMP_VERSION} GREATER 40 OR ${LIBOMP_OMP_VERSION} EQUAL 40)
++if(${LIBOMP_OMP_VERSION} GREATER 45 OR ${LIBOMP_OMP_VERSION} EQUAL 45)
++  set(LIBOMP_OMP_YEAR_MONTH 201511)
++elseif(${LIBOMP_OMP_VERSION} GREATER 40 OR ${LIBOMP_OMP_VERSION} EQUAL 40)
+   set(LIBOMP_OMP_YEAR_MONTH 201307)
+ elseif(${LIBOMP_OMP_VERSION} GREATER 30 OR ${LIBOMP_OMP_VERSION} EQUAL 30)
+   set(LIBOMP_OMP_YEAR_MONTH 201107)
+diff --git a/runtime/src/kmp_runtime.c b/runtime/src/kmp_runtime.c
+index c9c59c3..847f9be 100644
+--- a/runtime/src/kmp_runtime.c
++++ b/runtime/src/kmp_runtime.c
+@@ -43,7 +43,9 @@ char const __kmp_version_alt_comp[] = KMP_VERSION_PREFIX "alternative compiler s
+ #endif /* defined(KMP_GOMP_COMPAT) */
+ 
+ char const __kmp_version_omp_api[] = KMP_VERSION_PREFIX "API version: "
+-#if OMP_40_ENABLED
++#if OMP_45_ENABLED
++    "4.5 (201511)";
++#elif OMP_40_ENABLED
+     "4.0 (201307)";
+ #else
+     "3.1 (201107)";
+diff --git a/runtime/src/kmp_version.c b/runtime/src/kmp_version.c
+index 143de67..15edfd2 100644
+--- a/runtime/src/kmp_version.c
++++ b/runtime/src/kmp_version.c
+@@ -89,7 +89,9 @@ int const __kmp_version_major = KMP_VERSION_MAJOR;
+ int const __kmp_version_minor = KMP_VERSION_MINOR;
+ int const __kmp_version_build = KMP_VERSION_BUILD;
+ int const __kmp_openmp_version =
+-    #if OMP_40_ENABLED
++    #if OMP_45_ENABLED
++        201511;
++    #elif OMP_40_ENABLED
+         201307;
+     #else
+         201107;
+-- 
+2.7.3
+

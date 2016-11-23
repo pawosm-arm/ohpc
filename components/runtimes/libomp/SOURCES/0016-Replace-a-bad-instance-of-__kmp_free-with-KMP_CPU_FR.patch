@@ -1,0 +1,27 @@
+From 0cbd31b98f64b16e23d0fa803c22e917a5733043 Mon Sep 17 00:00:00 2001
+From: Jonathan Peyton <jonathan.l.peyton@intel.com>
+Date: Fri, 2 Sep 2016 19:37:12 +0000
+Subject: [PATCH 16/55] Replace a bad instance of __kmp_free() with
+ KMP_CPU_FREE_ARRAY() macro.
+
+git-svn-id: https://llvm.org/svn/llvm-project/openmp/trunk@280530 91177308-0d34-0410-b5e6-96231b3b80d8
+---
+ runtime/src/kmp_affinity.cpp | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/runtime/src/kmp_affinity.cpp b/runtime/src/kmp_affinity.cpp
+index 594d8e4..fe987d8 100644
+--- a/runtime/src/kmp_affinity.cpp
++++ b/runtime/src/kmp_affinity.cpp
+@@ -4141,7 +4141,7 @@ __kmp_aux_affinity_initialize(void)
+         KMP_ASSERT2(0, "Unexpected affinity setting");
+     }
+ 
+-    __kmp_free(osId2Mask);
++    KMP_CPU_FREE_ARRAY(osId2Mask, maxIndex+1);
+     machine_hierarchy.init(address2os, __kmp_avail_proc);
+ }
+ #undef KMP_EXIT_AFF_NONE
+-- 
+2.7.3
+

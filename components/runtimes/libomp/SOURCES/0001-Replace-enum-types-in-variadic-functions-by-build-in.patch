@@ -1,0 +1,99 @@
+From 6dd28bf89fac1320acd82964ce9a725b548bfb97 Mon Sep 17 00:00:00 2001
+From: Samuel Antao <sfantao@us.ibm.com>
+Date: Fri, 22 Jul 2016 16:05:35 +0000
+Subject: [PATCH 01/55] Replace enum types in variadic functions by build-in
+ types.
+
+Summary:
+When compiling the runtime library with clang we get warnings like:
+```
+error: passing an object that undergoes default argument promotion to 'va_start' has undefined behavior [-Werror,-Wvarargs]
+    va_start( args, id );
+                    ^
+note: parameter of type 'kmp_i18n_id_t' (aka 'kmp_i18n_id') is declared here
+    kmp_i18n_id_t id,
+```
+My understanding is that the va_start macro only gets the promoted type so it won't know what was the exact type of the argument, which can potentially not work for some targets given that the implementation of the the calling convention could not be done properly.
+
+This patch fixes that by using a built-in type in the function signature.
+
+Reviewers: tlwilmar, jlpeyton, AndreyChurbanov
+
+Subscribers: arpith-jacob, carlo.bertolli, caomhin, openmp-commits
+
+Differential Revision: https://reviews.llvm.org/D22427
+
+git-svn-id: https://llvm.org/svn/llvm-project/openmp/trunk@276428 91177308-0d34-0410-b5e6-96231b3b80d8
+---
+ runtime/src/kmp_i18n.c                              | 10 ++++++++--
+ runtime/src/kmp_i18n.h                              |  2 +-
+ runtime/src/thirdparty/ittnotify/ittnotify_static.c | 10 ++++++++--
+ 3 files changed, 17 insertions(+), 5 deletions(-)
+
+diff --git a/runtime/src/kmp_i18n.c b/runtime/src/kmp_i18n.c
+index 8dad255..546e693 100644
+--- a/runtime/src/kmp_i18n.c
++++ b/runtime/src/kmp_i18n.c
+@@ -703,7 +703,7 @@ __kmp_i18n_dump_catalog(
+ 
+ kmp_msg_t
+ __kmp_msg_format(
+-    kmp_i18n_id_t id,
++    unsigned id_arg,
+     ...
+ ) {
+ 
+@@ -712,7 +712,13 @@ __kmp_msg_format(
+     kmp_str_buf_t  buffer;
+     __kmp_str_buf_init( & buffer );
+ 
+-    va_start( args, id );
++    va_start( args, id_arg );
++
++    // We use unsigned for the ID argument and explicitly cast it here to the
++    // right enumerator because variadic functions are not compatible with
++    // default promotions.
++    kmp_i18n_id_t id = (kmp_i18n_id_t)id_arg;
++
+     #if KMP_OS_UNIX
+         // On Linux* OS and OS X*, printf() family functions process parameter numbers, for example:
+         // "%2$s %1$s".
+diff --git a/runtime/src/kmp_i18n.h b/runtime/src/kmp_i18n.h
+index 82ec51b..3d28da7 100644
+--- a/runtime/src/kmp_i18n.h
++++ b/runtime/src/kmp_i18n.h
+@@ -128,7 +128,7 @@ extern kmp_msg_t __kmp_msg_null;   // Denotes the end of variadic list of argume
+ // Helper functions. Creates messages either from message catalog or from system. Note: these
+ // functions allocate memory. You should pass created messages to __kmp_msg() function, it will
+ // print messages and destroy them.
+-kmp_msg_t  __kmp_msg_format( kmp_i18n_id_t id, ... );
++kmp_msg_t  __kmp_msg_format( unsigned id_arg, ... );
+ kmp_msg_t  __kmp_msg_error_code( int code );
+ kmp_msg_t  __kmp_msg_error_mesg( char const * mesg );
+ 
+diff --git a/runtime/src/thirdparty/ittnotify/ittnotify_static.c b/runtime/src/thirdparty/ittnotify/ittnotify_static.c
+index 5f36573..89a716d 100644
+--- a/runtime/src/thirdparty/ittnotify/ittnotify_static.c
++++ b/runtime/src/thirdparty/ittnotify/ittnotify_static.c
+@@ -285,10 +285,16 @@ ITT_EXTERN_C void _N_(error_handler)(__itt_error_code, va_list args);
+ #pragma warning(disable: 4055) /* warning C4055: 'type cast' : from data pointer 'void *' to function pointer 'XXX' */
+ #endif /* ITT_PLATFORM==ITT_PLATFORM_WIN */
+ 
+-static void __itt_report_error(__itt_error_code code, ...)
++static void __itt_report_error(unsigned code_arg, ...)
+ {
+     va_list args;
+-    va_start(args, code);
++    va_start(args, code_arg);
++
++    // We use unsigned for the code argument and explicitly cast it here to the
++    // right enumerator because variadic functions are not compatible with
++    // default promotions.
++    __itt_error_code code = (__itt_error_code)code_arg;
++
+     if (_N_(_ittapi_global).error_handler != NULL)
+     {
+         __itt_error_handler_t* handler = (__itt_error_handler_t*)(size_t)_N_(_ittapi_global).error_handler;
+-- 
+2.7.3
+

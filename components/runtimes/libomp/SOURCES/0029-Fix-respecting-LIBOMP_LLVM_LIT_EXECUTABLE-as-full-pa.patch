@@ -1,0 +1,63 @@
+From c5fa69cd0b9c2853da747e01152983248abb6f7b Mon Sep 17 00:00:00 2001
+From: Michal Gorny <mgorny@gentoo.org>
+Date: Mon, 19 Sep 2016 06:55:56 +0000
+Subject: [PATCH 29/55] Fix respecting LIBOMP_LLVM_LIT_EXECUTABLE as full path
+
+Fix lit search to correctly respect LIBOMP_LLVM_LIT_EXECUTABLE as full
+program path.
+
+The variable passed to find_program() is created by CMake as a cache
+variable, and therefore can be directly overriden by the user. Since
+this was the design of LIBOMP_LLVM_LIT_EXECUTABLE (as can be deduced
+from the error messages) and there is no other use of LIT_EXECUTABLE,
+remove the redundant variable and pass LIBOMP_LLVM_LIT_EXECUTABLE
+directly to find_program().
+
+Furthermore, the previous code did not work since the HINTS argument
+specifies more search directories rather than expected full path.
+Quoting the CMake documentation:
+
+> 3. Search the paths specified by the HINTS option. These should be
+> paths computed by system introspection, such as a hint provided by
+> the location of another item already found. Hard-coded guesses should
+> be specified with the PATHS option.
+
+Differential Revision: https://reviews.llvm.org/D24710
+
+git-svn-id: https://llvm.org/svn/llvm-project/openmp/trunk@281887 91177308-0d34-0410-b5e6-96231b3b80d8
+---
+ runtime/test/CMakeLists.txt | 9 +++------
+ 1 file changed, 3 insertions(+), 6 deletions(-)
+
+diff --git a/runtime/test/CMakeLists.txt b/runtime/test/CMakeLists.txt
+index cc4fc41..6c31a03 100644
+--- a/runtime/test/CMakeLists.txt
++++ b/runtime/test/CMakeLists.txt
+@@ -40,13 +40,10 @@ if(${LIBOMP_STANDALONE_BUILD})
+     "Compiler to use for testing OpenMP library")
+   set(LIBOMP_TEST_OPENMP_FLAG -fopenmp CACHE STRING
+     "OpenMP compiler flag to use for testing OpenMP library")
+-  set(LIBOMP_LLVM_LIT_EXECUTABLE "" CACHE STRING
+-    "Path to llvm-lit")
+-  find_program(LIT_EXECUTABLE
++  find_program(LIBOMP_LLVM_LIT_EXECUTABLE
+     NAMES llvm-lit lit.py
+-    HINTS ${LIBOMP_LLVM_LIT_EXECUTABLE}
+     PATHS ${OPENMP_LLVM_TOOLS_DIR})
+-  if(NOT LIT_EXECUTABLE)
++  if(NOT LIBOMP_LLVM_LIT_EXECUTABLE)
+     libomp_say("Cannot find llvm-lit.")
+     libomp_say("Please put llvm-lit in your PATH, set LIBOMP_LLVM_LIT_EXECUTABLE to its full path or point OPENMP_LLVM_TOOLS_DIR to its directory")
+     libomp_warning_say("The check-libomp target will not be available!")
+@@ -71,7 +68,7 @@ if(${LIBOMP_STANDALONE_BUILD})
+     "Default options for lit")
+   separate_arguments(LIBOMP_LIT_ARGS)
+   add_custom_target(check-libomp
+-    COMMAND ${PYTHON_EXECUTABLE} ${LIT_EXECUTABLE} ${LIBOMP_LIT_ARGS} ${CMAKE_CURRENT_BINARY_DIR}
++    COMMAND ${PYTHON_EXECUTABLE} ${LIBOMP_LLVM_LIT_EXECUTABLE} ${LIBOMP_LIT_ARGS} ${CMAKE_CURRENT_BINARY_DIR}
+     DEPENDS omp
+     COMMENT "Running libomp tests"
+     ${cmake_3_2_USES_TERMINAL}
+-- 
+2.7.3
+

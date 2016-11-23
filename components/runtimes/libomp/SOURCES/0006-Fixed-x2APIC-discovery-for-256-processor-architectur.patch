@@ -1,0 +1,48 @@
+From 6c90de7aaf1ca81224734c1b3bdd6ae2a4bccd75 Mon Sep 17 00:00:00 2001
+From: Andrey Churbanov <Andrey.Churbanov@intel.com>
+Date: Fri, 5 Aug 2016 15:59:11 +0000
+Subject: [PATCH 06/55] Fixed x2APIC discovery for 256-processor architectures.
+
+Mask for value read from ebx register returned by CPUID expanded to 0xFFFF.
+
+Differential Revision: https://reviews.llvm.org/D23203
+
+git-svn-id: https://llvm.org/svn/llvm-project/openmp/trunk@277825 91177308-0d34-0410-b5e6-96231b3b80d8
+---
+ runtime/src/kmp_affinity.cpp | 6 +++---
+ 1 file changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/runtime/src/kmp_affinity.cpp b/runtime/src/kmp_affinity.cpp
+index 5745f1e..594d8e4 100644
+--- a/runtime/src/kmp_affinity.cpp
++++ b/runtime/src/kmp_affinity.cpp
+@@ -1429,7 +1429,7 @@ __kmp_affinity_create_x2apicid_map(AddrUnsPair **address2os,
+             threadLevel = level;
+             coreLevel = -1;
+             pkgLevel = -1;
+-            __kmp_nThreadsPerCore = buf.ebx & 0xff;
++            __kmp_nThreadsPerCore = buf.ebx & 0xffff;
+             if (__kmp_nThreadsPerCore == 0) {
+                 *msg_id = kmp_i18n_str_InvalidCpuidInfo;
+                 return -1;
+@@ -1441,7 +1441,7 @@ __kmp_affinity_create_x2apicid_map(AddrUnsPair **address2os,
+             //
+             coreLevel = level;
+             pkgLevel = -1;
+-            nCoresPerPkg = buf.ebx & 0xff;
++            nCoresPerPkg = buf.ebx & 0xffff;
+             if (nCoresPerPkg == 0) {
+                 *msg_id = kmp_i18n_str_InvalidCpuidInfo;
+                 return -1;
+@@ -1456,7 +1456,7 @@ __kmp_affinity_create_x2apicid_map(AddrUnsPair **address2os,
+                 continue;
+             }
+             pkgLevel = level;
+-            nPackages = buf.ebx & 0xff;
++            nPackages = buf.ebx & 0xffff;
+             if (nPackages == 0) {
+                 *msg_id = kmp_i18n_str_InvalidCpuidInfo;
+                 return -1;
+-- 
+2.7.3
+

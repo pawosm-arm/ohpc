@@ -1,0 +1,605 @@
+From 0af08c496b1d91351ba88e4ee760e67d6de9a713 Mon Sep 17 00:00:00 2001
+From: Jonathan Peyton <jonathan.l.peyton@intel.com>
+Date: Tue, 27 Sep 2016 17:11:17 +0000
+Subject: [PATCH 30/55] Disable monitor thread creation by default.
+
+This change set disables creation of the monitor thread by default.  The global
+counter maintained by the monitor thread was replaced by logic that uses system
+time directly, and cyclic yielding on Linux target was also removed since there
+was no clear benefit of using it. Turning on KMP_USE_MONITOR variable (=1)
+enables creation of monitor thread again if it is really necessary for some
+reasons.
+
+Differential Revision: https://reviews.llvm.org/D24739
+
+
+git-svn-id: https://llvm.org/svn/llvm-project/openmp/trunk@282507 91177308-0d34-0410-b5e6-96231b3b80d8
+---
+ runtime/src/dllexports          |  4 +++-
+ runtime/src/exports_so.txt      |  4 +++-
+ runtime/src/kmp.h               | 15 ++++++++++++++-
+ runtime/src/kmp_global.c        | 11 +++++++++++
+ runtime/src/kmp_runtime.c       | 11 +++++++++--
+ runtime/src/kmp_settings.c      |  8 ++++++++
+ runtime/src/kmp_wait_release.h  | 30 ++++++++++++++++++++++++++++++
+ runtime/src/z_Linux_util.c      | 32 +++++++++++++++++++++++++++++++-
+ runtime/src/z_Windows_NT_util.c | 17 +++++++++++++++++
+ 9 files changed, 126 insertions(+), 6 deletions(-)
+
+diff --git a/runtime/src/dllexports b/runtime/src/dllexports
+index 571ab56..24b4421 100644
+--- a/runtime/src/dllexports
++++ b/runtime/src/dllexports
+@@ -162,9 +162,11 @@
+         __kmp_wait_yield_4
+         __kmp_fork_call
+         __kmp_invoke_microtask
++    %ifdef KMP_USE_MONITOR
+         __kmp_launch_monitor
+-        __kmp_launch_worker
+         __kmp_reap_monitor
++    %endif
++        __kmp_launch_worker
+         __kmp_reap_worker
+         __kmp_acquire_tas_lock
+         __kmp_acquire_nested_tas_lock
+diff --git a/runtime/src/exports_so.txt b/runtime/src/exports_so.txt
+index 3c10d73..db3d127 100644
+--- a/runtime/src/exports_so.txt
++++ b/runtime/src/exports_so.txt
+@@ -85,9 +85,11 @@ VERSION {
+         __kmp_invoke_microtask;
+         __kmp_itt_fini_ittlib;
+         __kmp_itt_init_ittlib;
++#if KMP_USE_MONITOR
+         __kmp_launch_monitor;
+-        __kmp_launch_worker;
+         __kmp_reap_monitor;
++#endif
++        __kmp_launch_worker;
+         __kmp_reap_worker;
+         __kmp_release_64;
+         __kmp_wait_64;
+diff --git a/runtime/src/kmp.h b/runtime/src/kmp.h
+index 60ae316..6175e1f 100644
+--- a/runtime/src/kmp.h
++++ b/runtime/src/kmp.h
+@@ -2733,7 +2733,9 @@ extern volatile int __kmp_init_gtid;
+ extern volatile int __kmp_init_common;
+ extern volatile int __kmp_init_middle;
+ extern volatile int __kmp_init_parallel;
++#if KMP_USE_MONITOR
+ extern volatile int __kmp_init_monitor;
++#endif
+ extern volatile int __kmp_init_user_locks;
+ extern int __kmp_init_counter;
+ extern int __kmp_root_counter;
+@@ -2760,7 +2762,9 @@ extern char const   *__kmp_barrier_pattern_name        [ bp_last_bar ];
+ extern kmp_bootstrap_lock_t __kmp_initz_lock;     /* control initialization */
+ extern kmp_bootstrap_lock_t __kmp_forkjoin_lock;  /* control fork/join access */
+ extern kmp_bootstrap_lock_t __kmp_exit_lock;      /* exit() is not always thread-safe */
++#if KMP_USE_MONITOR
+ extern kmp_bootstrap_lock_t __kmp_monitor_lock;   /* control monitor thread creation */
++#endif
+ extern kmp_bootstrap_lock_t __kmp_tp_cached_lock; /* used for the hack to allow threadprivate cache and __kmp_threads expansion to co-exist */
+ 
+ extern kmp_lock_t __kmp_global_lock;    /* control OS/global access  */
+@@ -2780,7 +2784,9 @@ extern enum sched_type  __kmp_auto;     /* default auto scheduling method */
+ extern int              __kmp_chunk;    /* default runtime chunk size */
+ 
+ extern size_t     __kmp_stksize;        /* stack size per thread         */
++#if KMP_USE_MONITOR
+ extern size_t     __kmp_monitor_stksize;/* stack size for monitor thread */
++#endif
+ extern size_t     __kmp_stkoffset;      /* stack offset per thread       */
+ extern int        __kmp_stkpadding;     /* Should we pad root thread(s) stack */
+ 
+@@ -2802,10 +2808,13 @@ extern int        __kmp_suspend_count;  /* count inside __kmp_suspend_template()
+ 
+ extern kmp_uint32 __kmp_yield_init;
+ extern kmp_uint32 __kmp_yield_next;
++
++#if KMP_USE_MONITOR
+ extern kmp_uint32 __kmp_yielding_on;
+ extern kmp_uint32 __kmp_yield_cycle;
+ extern kmp_int32  __kmp_yield_on_count;
+ extern kmp_int32  __kmp_yield_off_count;
++#endif
+ 
+ /* ------------------------------------------------------------------------- */
+ extern int        __kmp_allThreadsSpecified;
+@@ -3152,7 +3161,7 @@ extern void __kmp_check_stack_overlap( kmp_info_t *thr );
+ extern void __kmp_expand_host_name( char *buffer, size_t size );
+ extern void __kmp_expand_file_name( char *result, size_t rlen, char *pattern );
+ 
+-#if KMP_OS_WINDOWS
++#if KMP_ARCH_X86 || KMP_ARCH_X86_64
+ extern void __kmp_initialize_system_tick( void );  /* Initialize timer tick value */
+ #endif
+ 
+@@ -3193,7 +3202,9 @@ extern double __kmp_read_cpu_time( void );
+ 
+ extern int  __kmp_read_system_info( struct kmp_sys_info *info );
+ 
++#if KMP_USE_MONITOR
+ extern void __kmp_create_monitor( kmp_info_t *th );
++#endif
+ 
+ extern void *__kmp_launch_thread( kmp_info_t *thr );
+ 
+@@ -3205,7 +3216,9 @@ extern int  __kmp_is_thread_alive( kmp_info_t * th, DWORD *exit_val );
+ extern void __kmp_free_handle( kmp_thread_t tHandle );
+ #endif
+ 
++#if KMP_USE_MONITOR
+ extern void __kmp_reap_monitor( kmp_info_t *th );
++#endif
+ extern void __kmp_reap_worker( kmp_info_t *th );
+ extern void __kmp_terminate_thread( int gtid );
+ 
+diff --git a/runtime/src/kmp_global.c b/runtime/src/kmp_global.c
+index ac4fdbe..fc1d229 100644
+--- a/runtime/src/kmp_global.c
++++ b/runtime/src/kmp_global.c
+@@ -44,7 +44,9 @@ volatile int        __kmp_init_gtid       = FALSE;
+ volatile int        __kmp_init_common     = FALSE;
+ volatile int        __kmp_init_middle     = FALSE;
+ volatile int        __kmp_init_parallel   = FALSE;
++#if KMP_USE_MONITOR
+ volatile int        __kmp_init_monitor    = 0;  /* 1 - launched, 2 - actually started (Windows* OS only) */
++#endif
+ volatile int        __kmp_init_user_locks = FALSE;
+ 
+ /* list of address of allocated caches for commons */
+@@ -61,7 +63,9 @@ unsigned int __kmp_init_wait = KMP_DEFAULT_INIT_WAIT;   /* initial number of spi
+ unsigned int __kmp_next_wait = KMP_DEFAULT_NEXT_WAIT;   /* susequent number of spin-tests */
+ 
+ size_t      __kmp_stksize         = KMP_DEFAULT_STKSIZE;
++#if KMP_USE_MONITOR
+ size_t      __kmp_monitor_stksize = 0;  // auto adjust
++#endif
+ size_t      __kmp_stkoffset       = KMP_DEFAULT_STKOFFSET;
+ int         __kmp_stkpadding      = KMP_MIN_STKPADDING;
+ 
+@@ -343,6 +347,8 @@ int        __kmp_env_consistency_check  = FALSE;  /* KMP_CONSISTENCY_CHECK speci
+ 
+ kmp_uint32 __kmp_yield_init = KMP_INIT_WAIT;
+ kmp_uint32 __kmp_yield_next = KMP_NEXT_WAIT;
++
++#if KMP_USE_MONITOR
+ kmp_uint32 __kmp_yielding_on = 1;
+ #if KMP_OS_CNK
+ kmp_uint32 __kmp_yield_cycle = 0;
+@@ -351,6 +357,7 @@ kmp_uint32 __kmp_yield_cycle = 1;     /* Yield-cycle is on by default */
+ #endif
+ kmp_int32  __kmp_yield_on_count = 10; /* By default, yielding is on for 10 monitor periods. */
+ kmp_int32  __kmp_yield_off_count = 1; /* By default, yielding is off for 1 monitor periods. */
++#endif
+ /* ----------------------------------------------------- */
+ 
+ 
+@@ -398,8 +405,10 @@ KMP_ALIGN_CACHE_INTERNODE
+ kmp_bootstrap_lock_t __kmp_forkjoin_lock; /* control fork/join access */
+ KMP_ALIGN_CACHE_INTERNODE
+ kmp_bootstrap_lock_t __kmp_exit_lock;   /* exit() is not always thread-safe */
++#if KMP_USE_MONITOR
+ KMP_ALIGN_CACHE_INTERNODE
+ kmp_bootstrap_lock_t __kmp_monitor_lock; /* control monitor thread creation */
++#endif
+ KMP_ALIGN_CACHE_INTERNODE
+ kmp_bootstrap_lock_t __kmp_tp_cached_lock; /* used for the hack to allow threadprivate cache and __kmp_threads expansion to co-exist */
+ 
+@@ -415,7 +424,9 @@ KMP_ALIGN_CACHE
+ kmp_bootstrap_lock_t __kmp_initz_lock   = KMP_BOOTSTRAP_LOCK_INITIALIZER( __kmp_initz_lock   ); /* Control initializations */
+ kmp_bootstrap_lock_t __kmp_forkjoin_lock; /* control fork/join access */
+ kmp_bootstrap_lock_t __kmp_exit_lock;   /* exit() is not always thread-safe */
++#if KMP_USE_MONITOR
+ kmp_bootstrap_lock_t __kmp_monitor_lock; /* control monitor thread creation */
++#endif
+ kmp_bootstrap_lock_t __kmp_tp_cached_lock; /* used for the hack to allow threadprivate cache and __kmp_threads expansion to co-exist */
+ 
+ KMP_ALIGN(128)
+diff --git a/runtime/src/kmp_runtime.c b/runtime/src/kmp_runtime.c
+index 9ec3c59..c9c59c3 100644
+--- a/runtime/src/kmp_runtime.c
++++ b/runtime/src/kmp_runtime.c
+@@ -4172,6 +4172,7 @@ __kmp_allocate_thread( kmp_root_t *root, kmp_team_t *team, int new_tid )
+     KMP_ASSERT( __kmp_nth    == __kmp_all_nth );
+     KMP_ASSERT( __kmp_all_nth < __kmp_threads_capacity );
+ 
++#if KMP_USE_MONITOR
+     //
+     // If this is the first worker thread the RTL is creating, then also
+     // launch the monitor thread.  We try to do this as early as possible.
+@@ -4199,6 +4200,7 @@ __kmp_allocate_thread( kmp_root_t *root, kmp_team_t *team, int new_tid )
+         }
+         __kmp_release_bootstrap_lock( & __kmp_monitor_lock );
+     }
++#endif
+ 
+     KMP_MB();
+     for( new_gtid=1 ; TCR_PTR(__kmp_threads[new_gtid]) != NULL; ++new_gtid ) {
+@@ -5781,6 +5783,7 @@ __kmp_internal_end(void)
+     TCW_SYNC_4(__kmp_global.g.g_done, TRUE);
+ 
+     if ( i < __kmp_threads_capacity ) {
++#if KMP_USE_MONITOR
+         // 2009-09-08 (lev): Other alive roots found. Why do we kill the monitor??
+         KMP_MB();       /* Flush all pending memory write invalidates.  */
+ 
+@@ -5802,6 +5805,7 @@ __kmp_internal_end(void)
+         }
+         __kmp_release_bootstrap_lock( & __kmp_monitor_lock );
+         KA_TRACE( 10, ("__kmp_internal_end: monitor reaped\n" ) );
++#endif // KMP_USE_MONITOR
+     } else {
+         /* TODO move this to cleanup code */
+         #ifdef KMP_DEBUG
+@@ -5853,6 +5857,7 @@ __kmp_internal_end(void)
+         KA_TRACE( 10, ("__kmp_internal_end: all workers reaped\n" ) );
+         KMP_MB();
+ 
++#if KMP_USE_MONITOR
+         //
+         // See note above: One of the possible fixes for CQ138434 / CQ140126
+         //
+@@ -5866,7 +5871,7 @@ __kmp_internal_end(void)
+         }
+         __kmp_release_bootstrap_lock( & __kmp_monitor_lock );
+         KA_TRACE( 10, ("__kmp_internal_end: monitor reaped\n" ) );
+-
++#endif
+     } /* else !__kmp_global.t_active */
+     TCW_4(__kmp_init_gtid, FALSE);
+     KMP_MB();       /* Flush all pending memory write invalidates.  */
+@@ -6131,7 +6136,7 @@ __kmp_register_library_startup(
+         double dtime;
+         long   ltime;
+     } time;
+-    #if KMP_OS_WINDOWS
++    #if KMP_ARCH_X86 || KMP_ARCH_X86_64
+         __kmp_initialize_system_tick();
+     #endif
+     __kmp_read_system_time( & time.dtime );
+@@ -6337,7 +6342,9 @@ __kmp_do_serial_initialize( void )
+     __kmp_init_atomic_lock( & __kmp_atomic_lock_32c );
+     __kmp_init_bootstrap_lock( & __kmp_forkjoin_lock  );
+     __kmp_init_bootstrap_lock( & __kmp_exit_lock      );
++#if KMP_USE_MONITOR
+     __kmp_init_bootstrap_lock( & __kmp_monitor_lock   );
++#endif
+     __kmp_init_bootstrap_lock( & __kmp_tp_cached_lock );
+ 
+     /* conduct initialization and initial setup of configuration */
+diff --git a/runtime/src/kmp_settings.c b/runtime/src/kmp_settings.c
+index bb6c044..cdaa312 100644
+--- a/runtime/src/kmp_settings.c
++++ b/runtime/src/kmp_settings.c
+@@ -795,6 +795,7 @@ __kmp_stg_print_wait_policy( kmp_str_buf_t * buffer, char const * name, void * d
+ 
+ } // __kmp_stg_print_wait_policy
+ 
++#if KMP_USE_MONITOR
+ // -------------------------------------------------------------------------------------------------
+ // KMP_MONITOR_STACKSIZE
+ // -------------------------------------------------------------------------------------------------
+@@ -832,6 +833,7 @@ __kmp_stg_print_monitor_stacksize( kmp_str_buf_t * buffer, char const * name, vo
+     }
+ 
+ } // __kmp_stg_print_monitor_stacksize
++#endif // KMP_USE_MONITOR
+ 
+ // -------------------------------------------------------------------------------------------------
+ // KMP_SETTINGS
+@@ -3793,6 +3795,7 @@ __kmp_stg_print_par_range_env( kmp_str_buf_t * buffer, char const * name, void *
+     }
+ } // __kmp_stg_print_par_range_env
+ 
++#if KMP_USE_MONITOR
+ // -------------------------------------------------------------------------------------------------
+ // KMP_YIELD_CYCLE, KMP_YIELD_ON, KMP_YIELD_OFF
+ // -------------------------------------------------------------------------------------------------
+@@ -3828,6 +3831,7 @@ static void
+ __kmp_stg_print_yield_off( kmp_str_buf_t * buffer, char const * name, void * data ) {
+     __kmp_stg_print_int( buffer, name, __kmp_yield_off_count );
+ } // __kmp_stg_print_yield_off
++#endif // KMP_USE_MONITOR
+ 
+ #endif
+ 
+@@ -4675,7 +4679,9 @@ static kmp_setting_t __kmp_stg_table[] = {
+     { "KMP_DUPLICATE_LIB_OK",              __kmp_stg_parse_duplicate_lib_ok,   __kmp_stg_print_duplicate_lib_ok,   NULL, 0, 0 },
+     { "KMP_LIBRARY",                       __kmp_stg_parse_wait_policy,        __kmp_stg_print_wait_policy,        NULL, 0, 0 },
+     { "KMP_MAX_THREADS",                   __kmp_stg_parse_all_threads,        NULL,                               NULL, 0, 0 }, // For backward compatibility
++#if KMP_USE_MONITOR
+     { "KMP_MONITOR_STACKSIZE",             __kmp_stg_parse_monitor_stacksize,  __kmp_stg_print_monitor_stacksize,  NULL, 0, 0 },
++#endif
+     { "KMP_SETTINGS",                      __kmp_stg_parse_settings,           __kmp_stg_print_settings,           NULL, 0, 0 },
+     { "KMP_STACKOFFSET",                   __kmp_stg_parse_stackoffset,        __kmp_stg_print_stackoffset,        NULL, 0, 0 },
+     { "KMP_STACKSIZE",                     __kmp_stg_parse_stacksize,          __kmp_stg_print_stacksize,          NULL, 0, 0 },
+@@ -4731,9 +4737,11 @@ static kmp_setting_t __kmp_stg_table[] = {
+     { "KMP_DIAG",                          __kmp_stg_parse_diag,               __kmp_stg_print_diag,               NULL, 0, 0 },
+ 
+     { "KMP_PAR_RANGE",                     __kmp_stg_parse_par_range_env,      __kmp_stg_print_par_range_env,      NULL, 0, 0 },
++#if KMP_USE_MONITOR
+     { "KMP_YIELD_CYCLE",                   __kmp_stg_parse_yield_cycle,        __kmp_stg_print_yield_cycle,        NULL, 0, 0 },
+     { "KMP_YIELD_ON",                      __kmp_stg_parse_yield_on,           __kmp_stg_print_yield_on,           NULL, 0, 0 },
+     { "KMP_YIELD_OFF",                     __kmp_stg_parse_yield_off,          __kmp_stg_print_yield_off,          NULL, 0, 0 },
++#endif
+ #endif // KMP_DEBUG
+ 
+     { "KMP_ALIGN_ALLOC",                   __kmp_stg_parse_align_alloc,        __kmp_stg_print_align_alloc,        NULL, 0, 0 },
+diff --git a/runtime/src/kmp_wait_release.h b/runtime/src/kmp_wait_release.h
+index c8f6b5c..22ff8e8 100644
+--- a/runtime/src/kmp_wait_release.h
++++ b/runtime/src/kmp_wait_release.h
+@@ -84,6 +84,22 @@ class kmp_flag {
+     */
+ };
+ 
++#if ! KMP_USE_MONITOR
++# if KMP_OS_UNIX && (KMP_ARCH_X86 || KMP_ARCH_X86_64)
++   // HW TSC is used to reduce overhead (clock tick instead of nanosecond).
++   extern double __kmp_ticks_per_nsec;
++#  define KMP_NOW() __kmp_hardware_timestamp()
++#  define KMP_BLOCKTIME_INTERVAL() (__kmp_dflt_blocktime * KMP_USEC_PER_SEC * __kmp_ticks_per_nsec)
++#  define KMP_BLOCKING(goal, count) ((goal) > KMP_NOW())
++# else
++   // System time is retrieved sporadically while blocking.
++   extern kmp_uint64 __kmp_now_nsec();
++#  define KMP_NOW() __kmp_now_nsec()
++#  define KMP_BLOCKTIME_INTERVAL() (__kmp_dflt_blocktime * KMP_USEC_PER_SEC)
++#  define KMP_BLOCKING(goal, count) ((count) % 1000 != 0 || (goal) > KMP_NOW())
++# endif
++#endif
++
+ /* Spin wait loop that first does pause, then yield, then sleep. A thread that calls __kmp_wait_*
+    must make certain that another thread calls __kmp_release to wake it back up to prevent deadlocks!  */
+ template <class C>
+@@ -98,6 +114,10 @@ __kmp_wait_template(kmp_info_t *this_thr, C *flag, int final_spin
+     int th_gtid;
+     int tasks_completed = FALSE;
+     int oversubscribed;
++#if ! KMP_USE_MONITOR
++    kmp_uint64 poll_count;
++    kmp_uint64 hibernate_goal;
++#endif
+ 
+     KMP_FSYNC_SPIN_INIT(spin, NULL);
+     if (flag->done_check()) {
+@@ -142,6 +162,7 @@ __kmp_wait_template(kmp_info_t *this_thr, C *flag, int final_spin
+     KMP_INIT_YIELD(spins);
+ 
+     if (__kmp_dflt_blocktime != KMP_MAX_BLOCKTIME) {
++#if KMP_USE_MONITOR
+         // The worker threads cannot rely on the team struct existing at this point.
+         // Use the bt values cached in the thread struct instead.
+ #ifdef KMP_ADJUST_BLOCKTIME
+@@ -165,6 +186,10 @@ __kmp_wait_template(kmp_info_t *this_thr, C *flag, int final_spin
+         KF_TRACE(20, ("__kmp_wait_sleep: T#%d now=%d, hibernate=%d, intervals=%d\n",
+                       th_gtid, __kmp_global.g.g_time.dt.t_value, hibernate,
+                       hibernate - __kmp_global.g.g_time.dt.t_value));
++#else
++        hibernate_goal = KMP_NOW() + KMP_BLOCKTIME_INTERVAL();
++        poll_count = 0;
++#endif // KMP_USE_MONITOR
+     }
+ 
+     oversubscribed = (TCR_4(__kmp_nth) > __kmp_avail_proc);
+@@ -246,9 +271,14 @@ __kmp_wait_template(kmp_info_t *this_thr, C *flag, int final_spin
+         if ((task_team != NULL) && TCR_4(task_team->tt.tt_found_tasks))
+             continue;
+ 
++#if KMP_USE_MONITOR
+         // If we have waited a bit more, fall asleep
+         if (TCR_4(__kmp_global.g.g_time.dt.t_value) < hibernate)
+             continue;
++#else
++        if (KMP_BLOCKING(hibernate_goal, poll_count++))
++            continue;
++#endif
+ 
+         KF_TRACE(50, ("__kmp_wait_sleep: T#%d suspend time reached\n", th_gtid));
+ 
+diff --git a/runtime/src/z_Linux_util.c b/runtime/src/z_Linux_util.c
+index 578159b..6c51301 100644
+--- a/runtime/src/z_Linux_util.c
++++ b/runtime/src/z_Linux_util.c
+@@ -87,6 +87,8 @@ static pthread_mutexattr_t __kmp_suspend_mutex_attr;
+ static kmp_cond_align_t    __kmp_wait_cv;
+ static kmp_mutex_align_t   __kmp_wait_mx;
+ 
++double __kmp_ticks_per_nsec;
++
+ /* ------------------------------------------------------------------------ */
+ /* ------------------------------------------------------------------------ */
+ 
+@@ -757,6 +759,7 @@ __kmp_launch_worker( void *thr )
+     return exit_val;
+ }
+ 
++#if KMP_USE_MONITOR
+ /* The monitor thread controls all of the threads in the complex */
+ 
+ static void*
+@@ -953,6 +956,7 @@ __kmp_launch_monitor( void *thr )
+ 
+     return thr;
+ }
++#endif // KMP_USE_MONITOR
+ 
+ void
+ __kmp_create_worker( int gtid, kmp_info_t *th, size_t stack_size )
+@@ -1077,6 +1081,7 @@ __kmp_create_worker( int gtid, kmp_info_t *th, size_t stack_size )
+ } // __kmp_create_worker
+ 
+ 
++#if KMP_USE_MONITOR
+ void
+ __kmp_create_monitor( kmp_info_t *th )
+ {
+@@ -1237,6 +1242,7 @@ __kmp_create_monitor( kmp_info_t *th )
+     KA_TRACE( 10, ( "__kmp_create_monitor: monitor created %#.8lx\n", th->th.th_info.ds.ds_thread ) );
+ 
+ } // __kmp_create_monitor
++#endif // KMP_USE_MONITOR
+ 
+ void
+ __kmp_exit_thread(
+@@ -1245,6 +1251,7 @@ __kmp_exit_thread(
+     pthread_exit( (void *)(intptr_t) exit_status );
+ } // __kmp_exit_thread
+ 
++#if KMP_USE_MONITOR
+ void __kmp_resume_monitor();
+ 
+ void
+@@ -1296,6 +1303,7 @@ __kmp_reap_monitor( kmp_info_t *th )
+     KMP_MB();       /* Flush all pending memory write invalidates.  */
+ 
+ }
++#endif // KMP_USE_MONITOR
+ 
+ void
+ __kmp_reap_worker( kmp_info_t *th )
+@@ -1524,7 +1532,9 @@ __kmp_atfork_child (void)
+     ++__kmp_fork_count;
+ 
+     __kmp_init_runtime = FALSE;
++#if KMP_USE_MONITOR
+     __kmp_init_monitor = 0;
++#endif
+     __kmp_init_parallel = FALSE;
+     __kmp_init_middle = FALSE;
+     __kmp_init_serial = FALSE;
+@@ -1843,6 +1853,7 @@ void __kmp_resume_oncore(int target_gtid, kmp_flag_oncore *flag) {
+     __kmp_resume_template(target_gtid, flag);
+ }
+ 
++#if KMP_USE_MONITOR
+ void
+ __kmp_resume_monitor()
+ {
+@@ -1870,6 +1881,7 @@ __kmp_resume_monitor()
+     KF_TRACE( 30, ( "__kmp_resume_monitor: T#%d exiting after signaling wake up for T#%d\n",
+                     gtid, KMP_GTID_MONITOR ) );
+ }
++#endif // KMP_USE_MONITOR
+ 
+ /* ------------------------------------------------------------------------ */
+ /* ------------------------------------------------------------------------ */
+@@ -1877,7 +1889,11 @@ __kmp_resume_monitor()
+ void
+ __kmp_yield( int cond )
+ {
+-    if (cond && __kmp_yielding_on) {
++    if (cond
++#if KMP_USE_MONITOR
++        && __kmp_yielding_on
++#endif
++    ) {
+         sched_yield();
+     }
+ }
+@@ -2214,6 +2230,20 @@ __kmp_now_nsec()
+     return KMP_NSEC_PER_SEC*t.tv_sec + 1000*t.tv_usec;
+ }
+ 
++#if KMP_ARCH_X86 || KMP_ARCH_X86_64
++/* Measure clock tick per nanosecond */
++void
++__kmp_initialize_system_tick()
++{
++    kmp_uint64 delay = 100000; // 50~100 usec on most machines.
++    kmp_uint64 nsec = __kmp_now_nsec();
++    kmp_uint64 goal = __kmp_hardware_timestamp() + delay;
++    kmp_uint64 now;
++    while ((now = __kmp_hardware_timestamp()) < goal);
++    __kmp_ticks_per_nsec = 1.0 * (delay + (now - goal)) / (__kmp_now_nsec() - nsec);
++}
++#endif
++
+ /*
+     Determine whether the given address is mapped into the current address space.
+ */
+diff --git a/runtime/src/z_Windows_NT_util.c b/runtime/src/z_Windows_NT_util.c
+index 26f91d1..53b8eb8 100644
+--- a/runtime/src/z_Windows_NT_util.c
++++ b/runtime/src/z_Windows_NT_util.c
+@@ -140,7 +140,9 @@ static HMODULE kernel32 = NULL;
+     static int         __kmp_siginstalled[ NSIG ];
+ #endif
+ 
++#if KMP_USE_MONITOR
+ static HANDLE   __kmp_monitor_ev;
++#endif
+ static kmp_int64 __kmp_win32_time;
+ double __kmp_win32_tick;
+ 
+@@ -1195,6 +1197,15 @@ __kmp_read_system_time( double *delta )
+     }
+ }
+ 
++/* Return the current time stamp in nsec */
++kmp_uint64
++__kmp_now_nsec()
++{
++    LARGE_INTEGER now;
++    QueryPerformanceCounter(&now);
++    return 1e9 * __kmp_win32_tick * now.QuadPart;
++}
++
+ /* ------------------------------------------------------------------------ */
+ /* ------------------------------------------------------------------------ */
+ 
+@@ -1253,6 +1264,7 @@ __kmp_launch_worker( void *arg )
+     return exit_val;
+ }
+ 
++#if KMP_USE_MONITOR
+ /* The monitor thread controls all of the threads in the complex */
+ 
+ void * __stdcall
+@@ -1362,6 +1374,7 @@ __kmp_launch_monitor( void *arg )
+     KMP_MB();
+     return arg;
+ }
++#endif
+ 
+ void
+ __kmp_create_worker( int gtid, kmp_info_t *th, size_t stack_size )
+@@ -1455,6 +1468,7 @@ __kmp_still_running(kmp_info_t *th) {
+     return (WAIT_TIMEOUT == WaitForSingleObject( th->th.th_info.ds.ds_thread, 0));
+ }
+ 
++#if KMP_USE_MONITOR
+ void
+ __kmp_create_monitor( kmp_info_t *th )
+ {
+@@ -1525,6 +1539,7 @@ __kmp_create_monitor( kmp_info_t *th )
+     KA_TRACE( 10, ("__kmp_create_monitor: monitor created %p\n",
+                    (void *) th->th.th_info.ds.ds_thread ) );
+ }
++#endif
+ 
+ /*
+   Check to see if thread is still alive.
+@@ -1641,6 +1656,7 @@ __kmp_reap_common( kmp_info_t * th )
+     KMP_MB();       /* Flush all pending memory write invalidates.  */
+ }
+ 
++#if KMP_USE_MONITOR
+ void
+ __kmp_reap_monitor( kmp_info_t *th )
+ {
+@@ -1677,6 +1693,7 @@ __kmp_reap_monitor( kmp_info_t *th )
+ 
+     KMP_MB();       /* Flush all pending memory write invalidates.  */
+ }
++#endif
+ 
+ void
+ __kmp_reap_worker( kmp_info_t * th )
+-- 
+2.7.3
+

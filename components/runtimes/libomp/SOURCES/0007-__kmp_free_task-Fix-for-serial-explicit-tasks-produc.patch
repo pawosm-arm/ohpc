@@ -1,0 +1,220 @@
+From d9ae211c7da1f6d25bd1a0856d9a84871344db71 Mon Sep 17 00:00:00 2001
+From: Jonas Hahnfeld <Hahnfeld@itc.rwth-aachen.de>
+Date: Mon, 8 Aug 2016 10:08:07 +0000
+Subject: [PATCH 07/55] __kmp_free_task: Fix for serial explicit tasks
+ producing proxy tasks
+
+Consider the following code which may be executed by a serial team:
+
+    int dep;
+    #pragma omp target nowait depend(out: dep)
+    {
+        sleep(1);
+    }
+    #pragma omp task depend(in: dep)
+    {
+        #pragma omp target nowait
+        {
+            sleep(1);
+        }
+    }
+
+Here the explicit task may not be freed until the nested proxy task has
+finished. The current code hasn't considered this and called __kmp_free_task
+anyway which triggered an assert because of remaining incomplete children:
+
+    KMP_DEBUG_ASSERT( TCR_4(taskdata->td_incomplete_child_tasks) == 0 );
+
+Differential Revision: https://reviews.llvm.org/D23115
+
+git-svn-id: https://llvm.org/svn/llvm-project/openmp/trunk@277991 91177308-0d34-0410-b5e6-96231b3b80d8
+---
+ runtime/src/kmp_tasking.c                    |  24 +++--
+ runtime/test/tasking/bug_nested_proxy_task.c | 128 +++++++++++++++++++++++++++
+ 2 files changed, 138 insertions(+), 14 deletions(-)
+ create mode 100644 runtime/test/tasking/bug_nested_proxy_task.c
+
+diff --git a/runtime/src/kmp_tasking.c b/runtime/src/kmp_tasking.c
+index ce1b63d..ac9a25f 100644
+--- a/runtime/src/kmp_tasking.c
++++ b/runtime/src/kmp_tasking.c
+@@ -576,15 +576,13 @@ __kmp_free_task( kmp_int32 gtid, kmp_taskdata_t * taskdata, kmp_info_t * thread
+ static void
+ __kmp_free_task_and_ancestors( kmp_int32 gtid, kmp_taskdata_t * taskdata, kmp_info_t * thread )
+ {
+-    kmp_int32 children = 0;
+-    kmp_int32 team_or_tasking_serialized = taskdata -> td_flags.team_serial || taskdata -> td_flags.tasking_ser;
+-
++    // Proxy tasks must always be allowed to free their parents
++    // because they can be run in background even in serial mode.
++    kmp_int32 task_serial = taskdata->td_flags.task_serial && !taskdata->td_flags.proxy;
+     KMP_DEBUG_ASSERT( taskdata -> td_flags.tasktype == TASK_EXPLICIT );
+ 
+-    if ( !team_or_tasking_serialized ) {
+-        children = KMP_TEST_THEN_DEC32( (kmp_int32 *)(& taskdata -> td_allocated_child_tasks) ) - 1;
+-        KMP_DEBUG_ASSERT( children >= 0 );
+-    }
++    kmp_int32 children = KMP_TEST_THEN_DEC32( (kmp_int32 *)(& taskdata -> td_allocated_child_tasks) ) - 1;
++    KMP_DEBUG_ASSERT( children >= 0 );
+ 
+     // Now, go up the ancestor tree to see if any ancestors can now be freed.
+     while ( children == 0 )
+@@ -599,16 +597,14 @@ __kmp_free_task_and_ancestors( kmp_int32 gtid, kmp_taskdata_t * taskdata, kmp_in
+ 
+         taskdata = parent_taskdata;
+ 
+-        // Stop checking ancestors at implicit task or if tasking serialized
++        // Stop checking ancestors at implicit task
+         // instead of walking up ancestor tree to avoid premature deallocation of ancestors.
+-        if ( team_or_tasking_serialized || taskdata -> td_flags.tasktype == TASK_IMPLICIT )
++        if ( task_serial || taskdata -> td_flags.tasktype == TASK_IMPLICIT )
+             return;
+ 
+-        if ( !team_or_tasking_serialized ) {
+-            // Predecrement simulated by "- 1" calculation
+-            children = KMP_TEST_THEN_DEC32( (kmp_int32 *)(& taskdata -> td_allocated_child_tasks) ) - 1;
+-            KMP_DEBUG_ASSERT( children >= 0 );
+-        }
++        // Predecrement simulated by "- 1" calculation
++        children = KMP_TEST_THEN_DEC32( (kmp_int32 *)(& taskdata -> td_allocated_child_tasks) ) - 1;
++        KMP_DEBUG_ASSERT( children >= 0 );
+     }
+ 
+     KA_TRACE(20, ("__kmp_free_task_and_ancestors(exit): T#%d task %p has %d children; "
+diff --git a/runtime/test/tasking/bug_nested_proxy_task.c b/runtime/test/tasking/bug_nested_proxy_task.c
+new file mode 100644
+index 0000000..01fbbcf
+--- /dev/null
++++ b/runtime/test/tasking/bug_nested_proxy_task.c
+@@ -0,0 +1,128 @@
++// RUN: %libomp-compile -lpthread && %libomp-run
++#include <stdio.h>
++#include <omp.h>
++#include <pthread.h>
++#include "omp_my_sleep.h"
++
++/*
++ With task dependencies one can generate proxy tasks from an explicit task
++ being executed by a serial task team. The OpenMP runtime library didn't
++ expect that and tries to free the explicit task that is the parent of the
++ proxy task still working in background. It therefore has incomplete children
++ which triggers a debugging assertion.
++*/
++
++// Compiler-generated code (emulation)
++typedef long kmp_intptr_t;
++typedef int kmp_int32;
++
++typedef char bool;
++
++typedef struct ident {
++    kmp_int32 reserved_1;   /**<  might be used in Fortran; see above  */
++    kmp_int32 flags;        /**<  also f.flags; KMP_IDENT_xxx flags; KMP_IDENT_KMPC identifies this union member  */
++    kmp_int32 reserved_2;   /**<  not really used in Fortran any more; see above */
++#if USE_ITT_BUILD
++                            /*  but currently used for storing region-specific ITT */
++                            /*  contextual information. */
++#endif /* USE_ITT_BUILD */
++    kmp_int32 reserved_3;   /**< source[4] in Fortran, do not use for C++  */
++    char const *psource;    /**< String describing the source location.
++                            The string is composed of semi-colon separated fields which describe the source file,
++                            the function and a pair of line numbers that delimit the construct.
++                             */
++} ident_t;
++
++typedef struct kmp_depend_info {
++     kmp_intptr_t               base_addr;
++     size_t                     len;
++     struct {
++         bool                   in:1;
++         bool                   out:1;
++     } flags;
++} kmp_depend_info_t;
++
++struct kmp_task;
++typedef kmp_int32 (* kmp_routine_entry_t)( kmp_int32, struct kmp_task * );
++
++typedef struct kmp_task {                   /* GEH: Shouldn't this be aligned somehow? */
++    void *              shareds;            /**< pointer to block of pointers to shared vars   */
++    kmp_routine_entry_t routine;            /**< pointer to routine to call for executing task */
++    kmp_int32           part_id;            /**< part id for the task                          */
++} kmp_task_t;
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++kmp_int32  __kmpc_global_thread_num  ( ident_t * );
++kmp_task_t*
++__kmpc_omp_task_alloc( ident_t *loc_ref, kmp_int32 gtid, kmp_int32 flags,
++                       size_t sizeof_kmp_task_t, size_t sizeof_shareds,
++                       kmp_routine_entry_t task_entry );
++void __kmpc_proxy_task_completed_ooo ( kmp_task_t *ptask );
++kmp_int32 __kmpc_omp_task_with_deps ( ident_t *loc_ref, kmp_int32 gtid, kmp_task_t * new_task,
++                                      kmp_int32 ndeps, kmp_depend_info_t *dep_list,
++                                      kmp_int32 ndeps_noalias, kmp_depend_info_t *noalias_dep_list );
++kmp_int32
++__kmpc_omp_task( ident_t *loc_ref, kmp_int32 gtid, kmp_task_t * new_task );
++#ifdef __cplusplus
++}
++#endif
++
++void *target(void *task)
++{
++    my_sleep( 0.1 );
++    __kmpc_proxy_task_completed_ooo((kmp_task_t*) task);
++    return NULL;
++}
++
++pthread_t target_thread;
++
++// User's code
++int task_entry(kmp_int32 gtid, kmp_task_t *task)
++{
++    pthread_create(&target_thread, NULL, &target, task);
++    return 0;
++}
++
++int main()
++{
++    int dep;
++
++#pragma omp taskgroup
++{
++/*
++ *  Corresponds to:
++    #pragma omp target nowait depend(out: dep)
++    {
++        my_sleep( 0.1 );
++    }
++*/
++    kmp_depend_info_t dep_info;
++    dep_info.base_addr = (long) &dep;
++    dep_info.len = sizeof(int);
++    // out = inout per spec and runtime expects this
++    dep_info.flags.in = 1;
++    dep_info.flags.out = 1;
++
++    kmp_int32 gtid = __kmpc_global_thread_num(NULL);
++    kmp_task_t *proxy_task = __kmpc_omp_task_alloc(NULL,gtid,17,sizeof(kmp_task_t),0,&task_entry);
++    __kmpc_omp_task_with_deps(NULL,gtid,proxy_task,1,&dep_info,0,NULL);
++
++    #pragma omp task depend(in: dep)
++    {
++/*
++ *      Corresponds to:
++        #pragma omp target nowait depend(out: dep)
++        {
++            my_sleep( 0.1 );
++        }
++*/
++        kmp_task_t *nested_proxy_task = __kmpc_omp_task_alloc(NULL,gtid,17,sizeof(kmp_task_t),0,&task_entry);
++        __kmpc_omp_task(NULL,gtid,nested_proxy_task);
++    }
++}
++
++    // only check that it didn't crash
++    return 0;
++}
+-- 
+2.7.3
+

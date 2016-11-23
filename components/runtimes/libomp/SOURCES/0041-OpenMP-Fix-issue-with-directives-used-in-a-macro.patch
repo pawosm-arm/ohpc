@@ -1,0 +1,58 @@
+From c39d28cd812ac25a62497c434e5d49930610c167 Mon Sep 17 00:00:00 2001
+From: Samuel Antao <sfantao@us.ibm.com>
+Date: Thu, 20 Oct 2016 13:20:17 +0000
+Subject: [PATCH 41/55] [OpenMP] Fix issue with directives used in a macro.
+
+Summary:
+If directives are used in a macro, clang complains with:
+```
+src/projects/openmp/runtime/src/kmp_runtime.c:7486:2: error: embedding a directive within macro arguments has undefined behavior [-Werror,-Wembedded-directive]
+#if KMP_USE_MONITOR
+```
+
+This patch fixes two occurrences of the issue in `kmp_runtime.cpp`.
+
+Reviewers: tlwilmar, jlpeyton, AndreyChurbanov, Hahnfeld
+
+Subscribers: Hahnfeld, openmp-commits
+
+Differential Revision: https://reviews.llvm.org/D25823
+
+git-svn-id: https://llvm.org/svn/llvm-project/openmp/trunk@284728 91177308-0d34-0410-b5e6-96231b3b80d8
+---
+ runtime/src/kmp_runtime.c | 17 +++++++++--------
+ 1 file changed, 9 insertions(+), 8 deletions(-)
+
+diff --git a/runtime/src/kmp_runtime.c b/runtime/src/kmp_runtime.c
+index 478ac61..240d1f3 100644
+--- a/runtime/src/kmp_runtime.c
++++ b/runtime/src/kmp_runtime.c
+@@ -7482,16 +7482,17 @@ __kmp_aux_set_blocktime (int arg, kmp_info_t *thread, int tid)
+ 
+     set__bt_set_team( thread->th.th_team, tid, bt_set );
+     set__bt_set_team( thread->th.th_serial_team, 0, bt_set );
+-    KF_TRACE(10, ( "kmp_set_blocktime: T#%d(%d:%d), blocktime=%d"
+ #if KMP_USE_MONITOR
+-                   ", bt_intervals=%d, monitor_updates=%d"
+-#endif
+-                   "\n",
+-                   __kmp_gtid_from_tid(tid, thread->th.th_team), thread->th.th_team->t.t_id, tid, blocktime
+-#if KMP_USE_MONITOR
+-                   , bt_intervals, __kmp_monitor_wakeups
++    KF_TRACE(10, ("kmp_set_blocktime: T#%d(%d:%d), blocktime=%d, "
++                  "bt_intervals=%d, monitor_updates=%d\n",
++                  __kmp_gtid_from_tid(tid, thread->th.th_team),
++                  thread->th.th_team->t.t_id, tid, blocktime, bt_intervals,
++                  __kmp_monitor_wakeups));
++#else
++    KF_TRACE(10, ("kmp_set_blocktime: T#%d(%d:%d), blocktime=%d\n",
++                  __kmp_gtid_from_tid(tid, thread->th.th_team),
++                  thread->th.th_team->t.t_id, tid, blocktime));
+ #endif
+-                 ) );
+ }
+ 
+ void
+-- 
+2.7.3
+

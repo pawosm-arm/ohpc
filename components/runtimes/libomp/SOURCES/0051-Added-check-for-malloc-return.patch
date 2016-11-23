@@ -1,0 +1,41 @@
+From 76755788c3fe74c8d5382133fb32d5f917ae2ce3 Mon Sep 17 00:00:00 2001
+From: Andrey Churbanov <Andrey.Churbanov@intel.com>
+Date: Thu, 10 Nov 2016 09:08:03 +0000
+Subject: [PATCH 51/55] Added check for malloc return.
+
+Patch by Victor Campos.
+
+Differential Revision: https://reviews.llvm.org/D26318
+
+git-svn-id: https://llvm.org/svn/llvm-project/openmp/trunk@286441 91177308-0d34-0410-b5e6-96231b3b80d8
+---
+ runtime/src/kmp_i18n.c | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/runtime/src/kmp_i18n.c b/runtime/src/kmp_i18n.c
+index e008d1f..46ce10b 100644
+--- a/runtime/src/kmp_i18n.c
++++ b/runtime/src/kmp_i18n.c
+@@ -827,6 +827,9 @@ sys_error(
+             // TODO: Add checking result of malloc().
+             char * buffer = (char *) KMP_INTERNAL_MALLOC( size );
+             int    rc;
++            if (buffer == NULL) {
++                KMP_FATAL(MemoryAllocFailed);
++            }
+             rc = strerror_r( err, buffer, size );
+             if ( rc == -1 ) {
+                 rc = errno;            // XSI version sets errno.
+@@ -835,6 +838,9 @@ sys_error(
+                 KMP_INTERNAL_FREE( buffer );
+                 size *= 2;
+                 buffer = (char *) KMP_INTERNAL_MALLOC( size );
++                if (buffer == NULL) {
++                    KMP_FATAL(MemoryAllocFailed);
++                }
+                 rc = strerror_r( err, buffer, size );
+                 if ( rc == -1 ) {
+                     rc = errno;        // XSI version sets errno.
+-- 
+2.7.3
+

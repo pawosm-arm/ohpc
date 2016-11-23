@@ -1,0 +1,866 @@
+From 3fd0cf124fb83b5b8483ad0c813aeada6f8c3086 Mon Sep 17 00:00:00 2001
+From: Jonas Hahnfeld <Hahnfeld@itc.rwth-aachen.de>
+Date: Mon, 7 Nov 2016 15:58:36 +0000
+Subject: [PATCH 50/55] [OpenMP] Enable ThreadSanitizer to check OpenMP
+ programs
+
+This patch allows ThreadSanitizer (Tsan) to verify OpenMP programs.
+It means that no false positive will be reported by Tsan when
+verifying an OpenMP programs.
+This patch introduces annotations within the OpenMP runtime module to
+provide information about thread synchronization to the Tsan runtime.
+
+In order to enable the Tsan support when building the runtime, you must
+enable the TSAN_SUPPORT option with the following environment variable:
+
+-DLIBOMP_TSAN_SUPPORT=TRUE
+
+The annotations will be enabled in the main shared library
+(same mechanism of OMPT).
+
+Patch by Simone Atzeni and Joachim Protze!
+
+Differential Revision: https://reviews.llvm.org/D13072
+
+git-svn-id: https://llvm.org/svn/llvm-project/openmp/trunk@286115 91177308-0d34-0410-b5e6-96231b3b80d8
+---
+ runtime/CMakeLists.txt         |   9 ++-
+ runtime/cmake/config-ix.cmake  |   6 ++
+ runtime/src/CMakeLists.txt     |   2 +
+ runtime/src/exports_so.txt     |   3 +
+ runtime/src/kmp_barrier.cpp    |  29 +++++++
+ runtime/src/kmp_config.h.cmake |   4 +
+ runtime/src/kmp_lock.cpp       |  39 ++++++++--
+ runtime/src/kmp_runtime.c      |   2 +
+ runtime/src/kmp_tasking.c      |  27 ++++++-
+ runtime/src/tsan_annotations.c |  63 ++++++++++++++++
+ runtime/src/tsan_annotations.h | 168 +++++++++++++++++++++++++++++++++++++++++
+ runtime/src/z_Linux_util.c     |   4 +
+ 12 files changed, 346 insertions(+), 10 deletions(-)
+ create mode 100644 runtime/src/tsan_annotations.c
+ create mode 100644 runtime/src/tsan_annotations.h
+
+diff --git a/runtime/CMakeLists.txt b/runtime/CMakeLists.txt
+index 096f222..0df9cfd 100644
+--- a/runtime/CMakeLists.txt
++++ b/runtime/CMakeLists.txt
+@@ -315,6 +315,13 @@ if(LIBOMP_OMPT_SUPPORT AND (NOT LIBOMP_HAVE_OMPT_SUPPORT))
+   libomp_error_say("OpenMP Tools Interface requested but not available")
+ endif()
+ 
++# TSAN-support
++set(LIBOMP_TSAN_SUPPORT FALSE CACHE BOOL
++  "TSAN-support?")
++if(LIBOMP_TSAN_SUPPORT AND (NOT LIBOMP_HAVE_TSAN_SUPPORT))
++  libomp_error_say("TSAN functionality requested but not available")
++endif()
++
+ # Error check hwloc support after config-ix has run
+ if(LIBOMP_USE_HWLOC AND (NOT LIBOMP_HAVE_HWLOC))
+   libomp_error_say("Hwloc requested but not available")
+@@ -375,9 +382,9 @@ if(${LIBOMP_STANDALONE_BUILD})
+   endif()
+   libomp_say("Use Adaptive locks   -- ${LIBOMP_USE_ADAPTIVE_LOCKS}")
+   libomp_say("Use quad precision   -- ${LIBOMP_USE_QUAD_PRECISION}")
++  libomp_say("Use TSAN-support     -- ${LIBOMP_TSAN_SUPPORT}")
+   libomp_say("Use Hwloc library    -- ${LIBOMP_USE_HWLOC}")
+ endif()
+ 
+ add_subdirectory(src)
+ add_subdirectory(test)
+-
+diff --git a/runtime/cmake/config-ix.cmake b/runtime/cmake/config-ix.cmake
+index 206e689..c17c9f8 100644
+--- a/runtime/cmake/config-ix.cmake
++++ b/runtime/cmake/config-ix.cmake
+@@ -265,3 +265,9 @@ if(${LIBOMP_USE_HWLOC})
+   endif()
+ endif()
+ 
++# Check if ThreadSanitizer support is available
++if("${CMAKE_SYSTEM_NAME}" MATCHES "Linux" AND ${INTEL64})
++  set(LIBOMP_HAVE_TSAN_SUPPORT TRUE)
++else()
++  set(LIBOMP_HAVE_TSAN_SUPPORT FALSE)
++endif()
+diff --git a/runtime/src/CMakeLists.txt b/runtime/src/CMakeLists.txt
+index c80f88d..7c79276 100644
+--- a/runtime/src/CMakeLists.txt
++++ b/runtime/src/CMakeLists.txt
+@@ -113,6 +113,8 @@ libomp_append(LIBOMP_CFILES kmp_ftn_extra.c)
+ libomp_append(LIBOMP_CFILES kmp_version.c)
+ libomp_append(LIBOMP_CFILES ompt-general.c IF_TRUE LIBOMP_OMPT_SUPPORT)
+ 
++libomp_append(LIBOMP_CFILES tsan_annotations.c IF_TRUE LIBOMP_TSAN_SUPPORT)
++
+ set(LIBOMP_SOURCE_FILES ${LIBOMP_CFILES} ${LIBOMP_CXXFILES} ${LIBOMP_ASMFILES})
+ # For Windows, there is a resource file (.rc -> .res) that is also compiled
+ libomp_append(LIBOMP_SOURCE_FILES libomp.rc WIN32)
+diff --git a/runtime/src/exports_so.txt b/runtime/src/exports_so.txt
+index db3d127..f30db8b 100644
+--- a/runtime/src/exports_so.txt
++++ b/runtime/src/exports_so.txt
+@@ -28,6 +28,9 @@ VERSION {
+         ompt_tool;           # OMPT initialization interface
+         ompt_control;        # OMPT control interface
+ 
++        # icc drops weak attribute at linking step without the following line:
++        Annotate*;           # TSAN annotation
++
+         #
+         # OMPT state placeholders
+         #
+diff --git a/runtime/src/kmp_barrier.cpp b/runtime/src/kmp_barrier.cpp
+index 000a67f..7843b68 100644
+--- a/runtime/src/kmp_barrier.cpp
++++ b/runtime/src/kmp_barrier.cpp
+@@ -25,6 +25,8 @@
+ #define USE_NGO_STORES 1
+ #endif // KMP_MIC
+ 
++#include "tsan_annotations.h"
++
+ #if KMP_MIC && USE_NGO_STORES
+ // ICV copying
+ #define ngo_load(src)            __m512d Vt = _mm512_load_pd((void *)(src))
+@@ -107,8 +109,11 @@ __kmp_linear_barrier_gather(enum barrier_type bt, kmp_info_t *this_thr, int gtid
+             if (reduce) {
+                 KA_TRACE(100, ("__kmp_linear_barrier_gather: T#%d(%d:%d) += T#%d(%d:%d)\n", gtid,
+                                team->t.t_id, tid, __kmp_gtid_from_tid(i, team), team->t.t_id, i));
++                ANNOTATE_REDUCE_AFTER(reduce);
+                 (*reduce)(this_thr->th.th_local.reduce_data,
+                           other_threads[i]->th.th_local.reduce_data);
++                ANNOTATE_REDUCE_BEFORE(reduce);
++                ANNOTATE_REDUCE_BEFORE(&team->t.t_bar);
+             }
+         }
+         // Don't have to worry about sleep bit here or atomic since team setting
+@@ -274,7 +279,10 @@ __kmp_tree_barrier_gather(enum barrier_type bt, kmp_info_t *this_thr, int gtid,
+                 KA_TRACE(100, ("__kmp_tree_barrier_gather: T#%d(%d:%d) += T#%d(%d:%u)\n",
+                                gtid, team->t.t_id, tid, __kmp_gtid_from_tid(child_tid, team),
+                                team->t.t_id, child_tid));
++                ANNOTATE_REDUCE_AFTER(reduce);
+                 (*reduce)(this_thr->th.th_local.reduce_data, child_thr->th.th_local.reduce_data);
++                ANNOTATE_REDUCE_BEFORE(reduce);
++                ANNOTATE_REDUCE_BEFORE(&team->t.t_bar);
+             }
+             child++;
+             child_tid++;
+@@ -498,7 +506,10 @@ __kmp_hyper_barrier_gather(enum barrier_type bt, kmp_info_t *this_thr, int gtid,
+                 KA_TRACE(100, ("__kmp_hyper_barrier_gather: T#%d(%d:%d) += T#%d(%d:%u)\n",
+                                gtid, team->t.t_id, tid, __kmp_gtid_from_tid(child_tid, team),
+                                team->t.t_id, child_tid));
++                ANNOTATE_REDUCE_AFTER(reduce);
+                 (*reduce)(this_thr->th.th_local.reduce_data, child_thr->th.th_local.reduce_data);
++                ANNOTATE_REDUCE_BEFORE(reduce);
++                ANNOTATE_REDUCE_BEFORE(&team->t.t_bar);
+             }
+         }
+     }
+@@ -772,12 +783,15 @@ __kmp_hierarchical_barrier_gather(enum barrier_type bt, kmp_info_t *this_thr,
+                 flag.wait(this_thr, FALSE
+                           USE_ITT_BUILD_ARG(itt_sync_obj) );
+                 if (reduce) {
++                    ANNOTATE_REDUCE_AFTER(reduce);
+                     for (child_tid=tid+1; child_tid<=tid+thr_bar->leaf_kids; ++child_tid) {
+                         KA_TRACE(100, ("__kmp_hierarchical_barrier_gather: T#%d(%d:%d) += T#%d(%d:%d)\n",
+                                        gtid, team->t.t_id, tid, __kmp_gtid_from_tid(child_tid, team),
+                                        team->t.t_id, child_tid));
+                         (*reduce)(this_thr->th.th_local.reduce_data, other_threads[child_tid]->th.th_local.reduce_data);
+                     }
++                    ANNOTATE_REDUCE_BEFORE(reduce);
++                    ANNOTATE_REDUCE_BEFORE(&team->t.t_bar);
+                 }
+                 (void) KMP_TEST_THEN_AND64((volatile kmp_int64 *)&thr_bar->b_arrived, ~(thr_bar->leaf_state)); // clear leaf_state bits
+             }
+@@ -799,7 +813,10 @@ __kmp_hierarchical_barrier_gather(enum barrier_type bt, kmp_info_t *this_thr,
+                         KA_TRACE(100, ("__kmp_hierarchical_barrier_gather: T#%d(%d:%d) += T#%d(%d:%d)\n",
+                                        gtid, team->t.t_id, tid, __kmp_gtid_from_tid(child_tid, team),
+                                        team->t.t_id, child_tid));
++                        ANNOTATE_REDUCE_AFTER(reduce);
+                         (*reduce)(this_thr->th.th_local.reduce_data, child_thr->th.th_local.reduce_data);
++                        ANNOTATE_REDUCE_BEFORE(reduce);
++                        ANNOTATE_REDUCE_BEFORE(&team->t.t_bar);
+                     }
+                 }
+             }
+@@ -822,7 +839,10 @@ __kmp_hierarchical_barrier_gather(enum barrier_type bt, kmp_info_t *this_thr,
+                         KA_TRACE(100, ("__kmp_hierarchical_barrier_gather: T#%d(%d:%d) += T#%d(%d:%d)\n",
+                                        gtid, team->t.t_id, tid, __kmp_gtid_from_tid(child_tid, team),
+                                        team->t.t_id, child_tid));
++                        ANNOTATE_REDUCE_AFTER(reduce);
+                         (*reduce)(this_thr->th.th_local.reduce_data, child_thr->th.th_local.reduce_data);
++                        ANNOTATE_REDUCE_BEFORE(reduce);
++                        ANNOTATE_REDUCE_BEFORE(&team->t.t_bar);
+                     }
+                 }
+             }
+@@ -1063,6 +1083,7 @@ __kmp_barrier(enum barrier_type bt, int gtid, int is_split, size_t reduce_size,
+     KA_TRACE(15, ("__kmp_barrier: T#%d(%d:%d) has arrived\n",
+                   gtid, __kmp_team_from_gtid(gtid)->t.t_id, __kmp_tid_from_gtid(gtid)));
+ 
++    ANNOTATE_NEW_BARRIER_BEGIN(&team->t.t_bar);
+ #if OMPT_SUPPORT
+     if (ompt_enabled) {
+ #if OMPT_BLAME
+@@ -1303,6 +1324,7 @@ __kmp_barrier(enum barrier_type bt, int gtid, int is_split, size_t reduce_size,
+         this_thr->th.ompt_thread_info.state = ompt_state_work_parallel;
+     }
+ #endif
++    ANNOTATE_NEW_BARRIER_END(&team->t.t_bar);
+ 
+     return status;
+ }
+@@ -1316,6 +1338,7 @@ __kmp_end_split_barrier(enum barrier_type bt, int gtid)
+     kmp_info_t *this_thr = __kmp_threads[gtid];
+     kmp_team_t *team = this_thr->th.th_team;
+ 
++    ANNOTATE_NEW_BARRIER_BEGIN(&team->t.t_bar);
+     if (!team->t.t_serialized) {
+         if (KMP_MASTER_GTID(gtid)) {
+             switch (__kmp_barrier_release_pattern[bt]) {
+@@ -1346,6 +1369,7 @@ __kmp_end_split_barrier(enum barrier_type bt, int gtid)
+             } // if
+         }
+     }
++    ANNOTATE_NEW_BARRIER_END(&team->t.t_bar);
+ }
+ 
+ 
+@@ -1397,6 +1421,7 @@ __kmp_join_barrier(int gtid)
+     KMP_DEBUG_ASSERT(this_thr == team->t.t_threads[tid]);
+     KA_TRACE(10, ("__kmp_join_barrier: T#%d(%d:%d) arrived at join barrier\n", gtid, team_id, tid));
+ 
++    ANNOTATE_NEW_BARRIER_BEGIN(&team->t.t_bar);
+ #if OMPT_SUPPORT
+ #if OMPT_TRACE
+     if (ompt_enabled &&
+@@ -1559,6 +1584,7 @@ __kmp_join_barrier(int gtid)
+         this_thr->th.ompt_thread_info.state = ompt_state_overhead;
+     }
+ #endif
++    ANNOTATE_NEW_BARRIER_END(&team->t.t_bar);
+ }
+ 
+ 
+@@ -1574,6 +1600,8 @@ __kmp_fork_barrier(int gtid, int tid)
+ #if USE_ITT_BUILD
+     void * itt_sync_obj = NULL;
+ #endif /* USE_ITT_BUILD */
++    if (team)
++      ANNOTATE_NEW_BARRIER_END(&team->t.t_bar);
+ 
+     KA_TRACE(10, ("__kmp_fork_barrier: T#%d(%d:%d) has arrived\n",
+                   gtid, (team != NULL) ? team->t.t_id : -1, tid));
+@@ -1726,6 +1754,7 @@ __kmp_fork_barrier(int gtid, int tid)
+         } // (prepare called inside barrier_release)
+     }
+ #endif /* USE_ITT_BUILD && USE_ITT_NOTIFY */
++    ANNOTATE_NEW_BARRIER_END(&team->t.t_bar);
+     KA_TRACE(10, ("__kmp_fork_barrier: T#%d(%d:%d) is leaving\n", gtid, team->t.t_id, tid));
+ }
+ 
+diff --git a/runtime/src/kmp_config.h.cmake b/runtime/src/kmp_config.h.cmake
+index 8eb3e57..03f8cfd 100644
+--- a/runtime/src/kmp_config.h.cmake
++++ b/runtime/src/kmp_config.h.cmake
+@@ -68,6 +68,10 @@
+ #define OMP_45_ENABLED (LIBOMP_OMP_VERSION >= 45)
+ #define OMP_40_ENABLED (LIBOMP_OMP_VERSION >= 40)
+ #define OMP_30_ENABLED (LIBOMP_OMP_VERSION >= 30)
++#cmakedefine01 LIBOMP_TSAN_SUPPORT
++#if LIBOMP_TSAN_SUPPORT
++#define TSAN_SUPPORT
++#endif
+ 
+ // Configured cache line based on architecture
+ #if KMP_ARCH_PPC64
+diff --git a/runtime/src/kmp_lock.cpp b/runtime/src/kmp_lock.cpp
+index 2cca611..a1c2583 100644
+--- a/runtime/src/kmp_lock.cpp
++++ b/runtime/src/kmp_lock.cpp
+@@ -22,6 +22,8 @@
+ #include "kmp_lock.h"
+ #include "kmp_io.h"
+ 
++#include "tsan_annotations.h"
++
+ #if KMP_USE_FUTEX
+ # include <unistd.h>
+ # include <sys/syscall.h>
+@@ -134,7 +136,9 @@ __kmp_acquire_tas_lock_timed_template( kmp_tas_lock_t *lck, kmp_int32 gtid )
+ int
+ __kmp_acquire_tas_lock( kmp_tas_lock_t *lck, kmp_int32 gtid )
+ {
+-    return __kmp_acquire_tas_lock_timed_template( lck, gtid );
++  int retval = __kmp_acquire_tas_lock_timed_template( lck, gtid );
++  ANNOTATE_TAS_ACQUIRED(lck);
++  return retval;
+ }
+ 
+ static int
+@@ -179,6 +183,7 @@ __kmp_release_tas_lock( kmp_tas_lock_t *lck, kmp_int32 gtid )
+     KMP_MB();       /* Flush all pending memory write invalidates.  */
+ 
+     KMP_FSYNC_RELEASING(lck);
++    ANNOTATE_TAS_RELEASED(lck);
+     KMP_ST_REL32( &(lck->lk.poll), KMP_LOCK_FREE(tas) );
+     KMP_MB();       /* Flush all pending memory write invalidates.  */
+ 
+@@ -254,6 +259,7 @@ __kmp_acquire_nested_tas_lock( kmp_tas_lock_t *lck, kmp_int32 gtid )
+     }
+     else {
+         __kmp_acquire_tas_lock_timed_template( lck, gtid );
++        ANNOTATE_TAS_ACQUIRED(lck);
+         lck->lk.depth_locked = 1;
+         return KMP_LOCK_ACQUIRED_FIRST;
+     }
+@@ -467,7 +473,9 @@ __kmp_acquire_futex_lock_timed_template( kmp_futex_lock_t *lck, kmp_int32 gtid )
+ int
+ __kmp_acquire_futex_lock( kmp_futex_lock_t *lck, kmp_int32 gtid )
+ {
+-   return __kmp_acquire_futex_lock_timed_template( lck, gtid );
++  int retval = __kmp_acquire_futex_lock_timed_template( lck, gtid );
++  ANNOTATE_FUTEX_ACQUIRED(lck);
++  return retval;
+ }
+ 
+ static int
+@@ -514,6 +522,7 @@ __kmp_release_futex_lock( kmp_futex_lock_t *lck, kmp_int32 gtid )
+       lck, lck->lk.poll, gtid ) );
+ 
+     KMP_FSYNC_RELEASING(lck);
++    ANNOTATE_FUTEX_RELEASED(lck);
+ 
+     kmp_int32 poll_val = KMP_XCHG_FIXED32( & ( lck->lk.poll ), KMP_LOCK_FREE(futex) );
+ 
+@@ -603,6 +612,7 @@ __kmp_acquire_nested_futex_lock( kmp_futex_lock_t *lck, kmp_int32 gtid )
+     }
+     else {
+         __kmp_acquire_futex_lock_timed_template( lck, gtid );
++        ANNOTATE_FUTEX_ACQUIRED(lck);
+         lck->lk.depth_locked = 1;
+         return KMP_LOCK_ACQUIRED_FIRST;
+     }
+@@ -756,7 +766,9 @@ __kmp_acquire_ticket_lock_timed_template( kmp_ticket_lock_t *lck, kmp_int32 gtid
+ int
+ __kmp_acquire_ticket_lock( kmp_ticket_lock_t *lck, kmp_int32 gtid )
+ {
+-    return __kmp_acquire_ticket_lock_timed_template( lck, gtid );
++  int retval = __kmp_acquire_ticket_lock_timed_template( lck, gtid );
++  ANNOTATE_TICKET_ACQUIRED(lck);
++  return retval;
+ }
+ 
+ static int
+@@ -826,6 +838,7 @@ __kmp_release_ticket_lock( kmp_ticket_lock_t *lck, kmp_int32 gtid )
+ {
+     kmp_uint32 distance = std::atomic_load_explicit( &lck->lk.next_ticket, std::memory_order_relaxed ) - std::atomic_load_explicit( &lck->lk.now_serving, std::memory_order_relaxed );
+ 
++    ANNOTATE_TICKET_RELEASED(lck);
+     std::atomic_fetch_add_explicit( &lck->lk.now_serving, 1U, std::memory_order_release );
+ 
+     KMP_YIELD( distance
+@@ -924,6 +937,7 @@ __kmp_acquire_nested_ticket_lock( kmp_ticket_lock_t *lck, kmp_int32 gtid )
+     }
+     else {
+         __kmp_acquire_ticket_lock_timed_template( lck, gtid );
++        ANNOTATE_TICKET_ACQUIRED(lck);
+         std::atomic_store_explicit( &lck->lk.depth_locked, 1, std::memory_order_relaxed );
+         std::atomic_store_explicit( &lck->lk.owner_id, gtid + 1, std::memory_order_relaxed );
+         return KMP_LOCK_ACQUIRED_FIRST;
+@@ -1418,7 +1432,9 @@ __kmp_acquire_queuing_lock( kmp_queuing_lock_t *lck, kmp_int32 gtid )
+ {
+     KMP_DEBUG_ASSERT( gtid >= 0 );
+ 
+-    return __kmp_acquire_queuing_lock_timed_template<false>( lck, gtid );
++    int retval = __kmp_acquire_queuing_lock_timed_template<false>( lck, gtid );
++    ANNOTATE_QUEUING_ACQUIRED(lck);
++    return retval;
+ }
+ 
+ static int
+@@ -1468,6 +1484,7 @@ __kmp_test_queuing_lock( kmp_queuing_lock_t *lck, kmp_int32 gtid )
+         if ( KMP_COMPARE_AND_STORE_ACQ32( head_id_p, 0, -1 ) ) {
+             KA_TRACE( 1000, ("__kmp_test_queuing_lock: T#%d exiting: holding lock\n", gtid ));
+             KMP_FSYNC_ACQUIRED(lck);
++            ANNOTATE_QUEUING_ACQUIRED(lck);
+             return TRUE;
+         }
+     }
+@@ -1518,6 +1535,7 @@ __kmp_release_queuing_lock( kmp_queuing_lock_t *lck, kmp_int32 gtid )
+     KMP_DEBUG_ASSERT( this_thr->th.th_next_waiting == 0 );
+ 
+     KMP_FSYNC_RELEASING(lck);
++    ANNOTATE_QUEUING_RELEASED(lck);
+ 
+     while( 1 ) {
+         kmp_int32 dequeued;
+@@ -1722,6 +1740,7 @@ __kmp_acquire_nested_queuing_lock( kmp_queuing_lock_t *lck, kmp_int32 gtid )
+     }
+     else {
+         __kmp_acquire_queuing_lock_timed_template<false>( lck, gtid );
++        ANNOTATE_QUEUING_ACQUIRED(lck);
+         KMP_MB();
+         lck->lk.depth_locked = 1;
+         KMP_MB();
+@@ -2370,6 +2389,7 @@ __kmp_acquire_adaptive_lock( kmp_adaptive_lock_t * lck, kmp_int32 gtid )
+     __kmp_acquire_queuing_lock_timed_template<FALSE>( GET_QLK_PTR(lck), gtid );
+     // We have acquired the base lock, so count that.
+     KMP_INC_STAT(lck,nonSpeculativeAcquires );
++    ANNOTATE_QUEUING_ACQUIRED(lck);
+ }
+ 
+ static void
+@@ -2657,7 +2677,9 @@ __kmp_acquire_drdpa_lock_timed_template( kmp_drdpa_lock_t *lck, kmp_int32 gtid )
+ int
+ __kmp_acquire_drdpa_lock( kmp_drdpa_lock_t *lck, kmp_int32 gtid )
+ {
+-    return __kmp_acquire_drdpa_lock_timed_template( lck, gtid );
++    int retval = __kmp_acquire_drdpa_lock_timed_template( lck, gtid );
++    ANNOTATE_DRDPA_ACQUIRED(lck);
++    return retval;
+ }
+ 
+ static int
+@@ -2751,6 +2773,7 @@ __kmp_release_drdpa_lock( kmp_drdpa_lock_t *lck, kmp_int32 gtid )
+     KA_TRACE(1000, ("__kmp_release_drdpa_lock: ticket #%lld released lock %p\n",
+        ticket - 1, lck));
+     KMP_FSYNC_RELEASING(lck);
++    ANNOTATE_DRDPA_RELEASED(lck);
+     KMP_ST_REL64(&(polls[ticket & mask].poll), ticket); // volatile store
+     return KMP_LOCK_RELEASED;
+ }
+@@ -2856,6 +2879,7 @@ __kmp_acquire_nested_drdpa_lock( kmp_drdpa_lock_t *lck, kmp_int32 gtid )
+     }
+     else {
+         __kmp_acquire_drdpa_lock_timed_template( lck, gtid );
++        ANNOTATE_DRDPA_ACQUIRED(lck);
+         KMP_MB();
+         lck->lk.depth_locked = 1;
+         KMP_MB();
+@@ -4034,12 +4058,17 @@ __kmp_user_lock_allocate( void **user_lock, kmp_int32 gtid,
+ 
+     if ( __kmp_lock_pool == NULL ) {
+         // Lock pool is empty. Allocate new memory.
++
++        // ANNOTATION: Found no good way to express the syncronisation
++        // between allocation and usage, so ignore the allocation
++        ANNOTATE_IGNORE_WRITES_BEGIN();
+         if ( __kmp_num_locks_in_block <= 1 ) { // Tune this cutoff point.
+             lck = (kmp_user_lock_p) __kmp_allocate( __kmp_user_lock_size );
+         }
+         else {
+             lck = __kmp_lock_block_allocate();
+         }
++        ANNOTATE_IGNORE_WRITES_END();
+ 
+         // Insert lock in the table so that it can be freed in __kmp_cleanup,
+         // and debugger has info on all allocated locks.
+diff --git a/runtime/src/kmp_runtime.c b/runtime/src/kmp_runtime.c
+index bab59cb..3ef11ef 100644
+--- a/runtime/src/kmp_runtime.c
++++ b/runtime/src/kmp_runtime.c
+@@ -37,6 +37,7 @@
+ #include <process.h>
+ #endif
+ 
++#include "tsan_annotations.h"
+ 
+ #if defined(KMP_GOMP_COMPAT)
+ char const __kmp_version_alt_comp[] = KMP_VERSION_PREFIX "alternative compiler support: yes";
+@@ -5669,6 +5670,7 @@ __kmp_reap_thread(
+             /* Assume the threads are at the fork barrier here */
+             KA_TRACE( 20, ("__kmp_reap_thread: releasing T#%d from fork barrier for reap\n", gtid ) );
+             /* Need release fence here to prevent seg faults for tree forkjoin barrier (GEH) */
++            ANNOTATE_HAPPENS_BEFORE(thread);
+             kmp_flag_64 flag(&thread->th.th_bar[ bs_forkjoin_barrier ].bb.b_go, thread);
+             __kmp_release_64(&flag);
+         }; // if
+diff --git a/runtime/src/kmp_tasking.c b/runtime/src/kmp_tasking.c
+index a6658ad..5bed7fd 100644
+--- a/runtime/src/kmp_tasking.c
++++ b/runtime/src/kmp_tasking.c
+@@ -23,6 +23,8 @@
+ #include "ompt-specific.h"
+ #endif
+ 
++#include "tsan_annotations.h"
++
+ /* ------------------------------------------------------------------------ */
+ /* ------------------------------------------------------------------------ */
+ 
+@@ -555,6 +557,7 @@ __kmp_free_task( kmp_int32 gtid, kmp_taskdata_t * taskdata, kmp_info_t * thread
+     KMP_DEBUG_ASSERT( TCR_4(taskdata->td_incomplete_child_tasks) == 0 );
+ 
+     taskdata->td_flags.freed = 1;
++    ANNOTATE_HAPPENS_BEFORE(taskdata);
+     // deallocate the taskdata and shared variable blocks associated with this task
+     #if USE_FAST_MEMORY
+         __kmp_fast_free( thread, taskdata );
+@@ -1022,6 +1025,7 @@ __kmp_task_alloc( ident_t *loc_ref, kmp_int32 gtid, kmp_tasking_flags_t *flags,
+     #else /* ! USE_FAST_MEMORY */
+     taskdata = (kmp_taskdata_t *) __kmp_thread_malloc( thread, shareds_offset + sizeof_shareds );
+     #endif /* USE_FAST_MEMORY */
++    ANNOTATE_HAPPENS_AFTER(taskdata);
+ 
+     task                      = KMP_TASKDATA_TO_TASK(taskdata);
+ 
+@@ -1121,6 +1125,7 @@ __kmp_task_alloc( ident_t *loc_ref, kmp_int32 gtid, kmp_tasking_flags_t *flags,
+ 
+     KA_TRACE(20, ("__kmp_task_alloc(exit): T#%d created task %p parent=%p\n",
+                   gtid, taskdata, taskdata->td_parent) );
++    ANNOTATE_HAPPENS_BEFORE(task);
+ 
+ #if OMPT_SUPPORT
+     __kmp_task_init_ompt(taskdata, gtid, (void*) task_entry);
+@@ -1206,9 +1211,13 @@ __kmp_invoke_task( kmp_int32 gtid, kmp_task_t *task, kmp_taskdata_t * current_ta
+ 
+ #if OMP_45_ENABLED
+     // Proxy tasks are not handled by the runtime
+-    if ( taskdata->td_flags.proxy != TASK_PROXY )
++    if ( taskdata->td_flags.proxy != TASK_PROXY ) {
++#endif
++      ANNOTATE_HAPPENS_AFTER(task);
++      __kmp_task_start( gtid, task, current_task );
++#if OMP_45_ENABLED
++    }
+ #endif
+-    __kmp_task_start( gtid, task, current_task );
+ 
+ #if OMPT_SUPPORT
+     ompt_thread_info_t oldInfo;
+@@ -1303,9 +1312,13 @@ __kmp_invoke_task( kmp_int32 gtid, kmp_task_t *task, kmp_taskdata_t * current_ta
+ 
+ #if OMP_45_ENABLED
+     // Proxy tasks are not handled by the runtime
+-    if ( taskdata->td_flags.proxy != TASK_PROXY )
++    if ( taskdata->td_flags.proxy != TASK_PROXY ) {
++#endif
++      ANNOTATE_HAPPENS_BEFORE(taskdata->td_parent);
++      __kmp_task_finish( gtid, task, current_task );
++#if OMP_45_ENABLED
++    }
+ #endif
+-       __kmp_task_finish( gtid, task, current_task );
+ 
+ #if USE_ITT_BUILD && USE_ITT_NOTIFY
+     // Barrier imbalance - correct arrive time after the task finished
+@@ -1353,6 +1366,7 @@ __kmpc_omp_task_parts( ident_t *loc_ref, kmp_int32 gtid, kmp_task_t * new_task)
+                   "loc=%p task=%p, return: TASK_CURRENT_NOT_QUEUED\n", gtid, loc_ref,
+                   new_taskdata ) );
+ 
++    ANNOTATE_HAPPENS_BEFORE(new_task);
+     return TASK_CURRENT_NOT_QUEUED;
+ }
+ 
+@@ -1397,6 +1411,7 @@ __kmp_omp_task( kmp_int32 gtid, kmp_task_t * new_task, bool serialize_immediate
+     }
+ #endif
+ 
++    ANNOTATE_HAPPENS_BEFORE(new_task);
+     return TASK_CURRENT_NOT_QUEUED;
+ }
+ 
+@@ -1511,6 +1526,7 @@ __kmpc_omp_taskwait( ident_t *loc_ref, kmp_int32 gtid )
+             taskdata->ompt_task_info.frame.reenter_runtime_frame = NULL;
+         }
+ #endif
++        ANNOTATE_HAPPENS_AFTER(taskdata);
+     }
+ 
+     KA_TRACE(10, ("__kmpc_omp_taskwait(exit): T#%d task %p finished waiting, "
+@@ -1649,6 +1665,7 @@ __kmpc_end_taskgroup( ident_t* loc, int gtid )
+     __kmp_thread_free( thread, taskgroup );
+ 
+     KA_TRACE(10, ("__kmpc_end_taskgroup(exit): T#%d task %p finished waiting\n", gtid, taskdata) );
++    ANNOTATE_HAPPENS_AFTER(taskdata);
+ }
+ #endif
+ 
+@@ -2328,8 +2345,10 @@ __kmp_realloc_task_threads_data( kmp_info_t *thread, kmp_task_team_t *task_team
+                 // Make the initial allocate for threads_data array, and zero entries
+                 // Cannot use __kmp_thread_calloc() because threads not around for
+                 // kmp_reap_task_team( ).
++                ANNOTATE_IGNORE_WRITES_BEGIN();
+                 *threads_data_p = (kmp_thread_data_t *)
+                                   __kmp_allocate( nthreads * sizeof(kmp_thread_data_t) );
++                ANNOTATE_IGNORE_WRITES_END();
+ #ifdef BUILD_TIED_TASK_STACK
+                 // GEH: Figure out if this is the right thing to do
+                 for (i = 0; i < nthreads; i++) {
+diff --git a/runtime/src/tsan_annotations.c b/runtime/src/tsan_annotations.c
+new file mode 100644
+index 0000000..edc4e7c
+--- /dev/null
++++ b/runtime/src/tsan_annotations.c
+@@ -0,0 +1,63 @@
++/*
++ * tsan_annotations.c -- ThreadSanitizer annotations to support data
++ * race detection in OpenMP programs.
++ */
++
++
++//===----------------------------------------------------------------------===//
++//
++//                     The LLVM Compiler Infrastructure
++//
++// This file is dual licensed under the MIT and the University of Illinois Open
++// Source Licenses. See LICENSE.txt for details.
++//
++//===----------------------------------------------------------------------===//
++
++#include "tsan_annotations.h"
++
++#include <stdio.h>
++
++typedef unsigned long uptr;
++typedef signed   long sptr;
++
++extern "C" __attribute__((weak)) void AnnotateHappensBefore(const char *f, int l, uptr addr) {}
++extern "C" __attribute__((weak)) void AnnotateHappensAfter(const char *f, int l, uptr addr) {}
++extern "C" __attribute__((weak)) void AnnotateCondVarSignal(const char *f, int l, uptr cv) {}
++extern "C" __attribute__((weak)) void AnnotateCondVarSignalAll(const char *f, int l, uptr cv) {}
++extern "C" __attribute__((weak)) void AnnotateMutexIsNotPHB(const char *f, int l, uptr mu) {}
++extern "C" __attribute__((weak)) void AnnotateCondVarWait(const char *f, int l, uptr cv, uptr lock) {}
++extern "C" __attribute__((weak)) void AnnotateRWLockCreate(const char *f, int l, uptr m) {}
++extern "C" __attribute__((weak)) void AnnotateRWLockCreateStatic(const char *f, int l, uptr m) {}
++extern "C" __attribute__((weak)) void AnnotateRWLockDestroy(const char *f, int l, uptr m) {}
++extern "C" __attribute__((weak)) void AnnotateRWLockAcquired(const char *f, int l, uptr m, uptr is_w) {}
++extern "C" __attribute__((weak)) void AnnotateRWLockReleased(const char *f, int l, uptr m, uptr is_w) {}
++extern "C" __attribute__((weak)) void AnnotateTraceMemory(const char *f, int l, uptr mem) {}
++extern "C" __attribute__((weak)) void AnnotateFlushState(const char *f, int l) {}
++extern "C" __attribute__((weak)) void AnnotateNewMemory(const char *f, int l, uptr mem, uptr size) {}
++extern "C" __attribute__((weak)) void AnnotateNoOp(const char *f, int l, uptr mem) {}
++extern "C" __attribute__((weak)) void AnnotateFlushExpectedRaces(const char *f, int l) {}
++extern "C" __attribute__((weak)) void AnnotateEnableRaceDetection( const char *f, int l, int enable) {}
++extern "C" __attribute__((weak)) void AnnotateMutexIsUsedAsCondVar( const char *f, int l, uptr mu) {}
++extern "C" __attribute__((weak)) void AnnotatePCQGet( const char *f, int l, uptr pcq) {}
++extern "C" __attribute__((weak)) void AnnotatePCQPut( const char *f, int l, uptr pcq) {}
++extern "C" __attribute__((weak)) void AnnotatePCQDestroy( const char *f, int l, uptr pcq) {}
++extern "C" __attribute__((weak)) void AnnotatePCQCreate( const char *f, int l, uptr pcq) {}
++extern "C" __attribute__((weak)) void AnnotateExpectRace( const char *f, int l, uptr mem, char *desc) {}
++extern "C" __attribute__((weak)) void AnnotateBenignRaceSized( const char *f, int l, uptr mem, uptr size, char *desc) {}
++extern "C" __attribute__((weak)) void AnnotateBenignRace( const char *f, int l, uptr mem, char *desc) {}
++extern "C" __attribute__((weak)) void AnnotateIgnoreReadsBegin(const char *f, int l) {}
++extern "C" __attribute__((weak)) void AnnotateIgnoreReadsEnd(const char *f, int l) {}
++extern "C" __attribute__((weak)) void AnnotateIgnoreWritesBegin(const char *f, int l) {}
++extern "C" __attribute__((weak)) void AnnotateIgnoreWritesEnd(const char *f, int l) {}
++extern "C" __attribute__((weak)) void AnnotateIgnoreSyncBegin(const char *f, int l) {}
++extern "C" __attribute__((weak)) void AnnotateIgnoreSyncEnd(const char *f, int l) {}
++extern "C" __attribute__((weak)) void AnnotatePublishMemoryRange( const char *f, int l, uptr addr, uptr size) {}
++extern "C" __attribute__((weak)) void AnnotateUnpublishMemoryRange( const char *f, int l, uptr addr, uptr size) {}
++extern "C" __attribute__((weak)) void AnnotateThreadName( const char *f, int l, char *name) {}
++extern "C" __attribute__((weak)) void WTFAnnotateHappensBefore(const char *f, int l, uptr addr) {}
++extern "C" __attribute__((weak)) void WTFAnnotateHappensAfter(const char *f, int l, uptr addr) {}
++extern "C" __attribute__((weak)) void WTFAnnotateBenignRaceSized( const char *f, int l, uptr mem, uptr sz, char *desc) {}
++extern "C" __attribute__((weak)) int RunningOnValgrind() {return 0;}
++extern "C" __attribute__((weak)) double ValgrindSlowdown(void) {return 0;}
++extern "C" __attribute__((weak)) const char __attribute__((weak))* ThreadSanitizerQuery(const char *query) {return 0;}
++extern "C" __attribute__((weak)) void AnnotateMemoryIsInitialized(const char *f, int l, uptr mem, uptr sz) {}
+diff --git a/runtime/src/tsan_annotations.h b/runtime/src/tsan_annotations.h
+new file mode 100644
+index 0000000..c462439
+--- /dev/null
++++ b/runtime/src/tsan_annotations.h
+@@ -0,0 +1,168 @@
++/*! \file */
++/*
++ * tsan_annotations.h -- ThreadSanitizer annotations to support data
++ * race detection in OpenMP programs.
++ */
++
++
++//===----------------------------------------------------------------------===//
++//
++//                     The LLVM Compiler Infrastructure
++//
++// This file is dual licensed under the MIT and the University of Illinois Open
++// Source Licenses. See LICENSE.txt for details.
++//
++//===----------------------------------------------------------------------===//
++
++#ifndef TSAN_ANNOTATIONS_H
++#define TSAN_ANNOTATIONS_H
++
++#include "kmp_config.h"
++
++/* types as used in tsan/rtl/tsan_interface_ann.cc */
++typedef unsigned long uptr;
++typedef signed   long sptr;
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++/* Declaration of all annotation functions in tsan/rtl/tsan_interface_ann.cc */
++void AnnotateHappensBefore(const char *f, int l, uptr addr);
++void AnnotateHappensAfter(const char *f, int l, uptr addr);
++void AnnotateCondVarSignal(const char *f, int l, uptr cv);
++void AnnotateCondVarSignalAll(const char *f, int l, uptr cv);
++void AnnotateMutexIsNotPHB(const char *f, int l, uptr mu);
++void AnnotateCondVarWait(const char *f, int l, uptr cv, uptr lock);
++void AnnotateRWLockCreate(const char *f, int l, uptr m);
++void AnnotateRWLockCreateStatic(const char *f, int l, uptr m);
++void AnnotateRWLockDestroy(const char *f, int l, uptr m);
++void AnnotateRWLockAcquired(const char *f, int l, uptr m, uptr is_w);
++void AnnotateRWLockReleased(const char *f, int l, uptr m, uptr is_w);
++void AnnotateTraceMemory(const char *f, int l, uptr mem);
++void AnnotateFlushState(const char *f, int l);
++void AnnotateNewMemory(const char *f, int l, uptr mem, uptr size);
++void AnnotateNoOp(const char *f, int l, uptr mem);
++void AnnotateFlushExpectedRaces(const char *f, int l);
++void AnnotateEnableRaceDetection( const char *f, int l, int enable);
++void AnnotateMutexIsUsedAsCondVar( const char *f, int l, uptr mu);
++void AnnotatePCQGet( const char *f, int l, uptr pcq);
++void AnnotatePCQPut( const char *f, int l, uptr pcq);
++void AnnotatePCQDestroy( const char *f, int l, uptr pcq);
++void AnnotatePCQCreate( const char *f, int l, uptr pcq);
++void AnnotateExpectRace( const char *f, int l, uptr mem, char *desc);
++void AnnotateBenignRaceSized( const char *f, int l, uptr mem, uptr size, char *desc);
++void AnnotateBenignRace( const char *f, int l, uptr mem, char *desc);
++void AnnotateIgnoreReadsBegin(const char *f, int l);
++void AnnotateIgnoreReadsEnd(const char *f, int l);
++void AnnotateIgnoreWritesBegin(const char *f, int l);
++void AnnotateIgnoreWritesEnd(const char *f, int l);
++void AnnotateIgnoreSyncBegin(const char *f, int l);
++void AnnotateIgnoreSyncEnd(const char *f, int l);
++void AnnotatePublishMemoryRange( const char *f, int l, uptr addr, uptr size);
++void AnnotateUnpublishMemoryRange( const char *f, int l, uptr addr, uptr size);
++void AnnotateThreadName( const char *f, int l, char *name);
++void WTFAnnotateHappensBefore(const char *f, int l, uptr addr);
++void WTFAnnotateHappensAfter(const char *f, int l, uptr addr);
++void WTFAnnotateBenignRaceSized( const char *f, int l, uptr mem, uptr sz, char *desc);
++int RunningOnValgrind();
++double ValgrindSlowdown(void);
++const char * ThreadSanitizerQuery(const char *query);
++void AnnotateMemoryIsInitialized(const char *f, int l, uptr mem, uptr sz);
++
++#ifdef __cplusplus
++}
++#endif
++
++#ifdef TSAN_SUPPORT
++#define ANNOTATE_HAPPENS_AFTER(addr) AnnotateHappensAfter(__FILE__, __LINE__, (uptr)addr)
++#define ANNOTATE_HAPPENS_BEFORE(addr) AnnotateHappensBefore(__FILE__, __LINE__, (uptr)addr)
++#define ANNOTATE_IGNORE_WRITES_BEGIN() AnnotateIgnoreWritesBegin(__FILE__, __LINE__)
++#define ANNOTATE_IGNORE_WRITES_END() AnnotateIgnoreWritesEnd(__FILE__, __LINE__)
++#define ANNOTATE_RWLOCK_CREATE(lck) AnnotateRWLockCreate(__FILE__, __LINE__, (uptr)lck)
++#define ANNOTATE_RWLOCK_RELEASED(lck) AnnotateRWLockAcquired(__FILE__, __LINE__, (uptr)lck, 1)
++#define ANNOTATE_RWLOCK_ACQUIRED(lck) AnnotateRWLockReleased(__FILE__, __LINE__, (uptr)lck, 1)
++
++/* new higher level barrier annotations */
++#define ANNOTATE_NEW_BARRIER_BEGIN(addr) AnnotateHappensBefore(__FILE__, __LINE__, (uptr)addr)
++#define ANNOTATE_NEW_BARRIER_END(addr) AnnotateHappensAfter(__FILE__, __LINE__, (uptr)addr)
++// #define ANNOTATE_NEW_BARRIER_BEGIN(addr)
++// #define ANNOTATE_NEW_BARRIER_END(addr)
++
++
++#define ANNOTATE_REDUCE_AFTER(addr) AnnotateHappensAfter(__FILE__, __LINE__, (uptr)addr)
++#define ANNOTATE_REDUCE_BEFORE(addr) AnnotateHappensBefore(__FILE__, __LINE__, (uptr)addr)
++// #define ANNOTATE_REDUCE_AFTER(addr)
++// #define ANNOTATE_REDUCE_BEFORE(addr)
++
++#else
++#define ANNOTATE_HAPPENS_AFTER(addr)
++#define ANNOTATE_HAPPENS_BEFORE(addr)
++#define ANNOTATE_IGNORE_WRITES_BEGIN()
++#define ANNOTATE_IGNORE_WRITES_END()
++#define ANNOTATE_RWLOCK_CREATE(lck)
++#define ANNOTATE_RWLOCK_RELEASED(lck)
++#define ANNOTATE_RWLOCK_ACQUIRED(lck)
++#define ANNOTATE_NEW_BARRIER_BEGIN(addr)
++#define ANNOTATE_NEW_BARRIER_END(addr)
++#define ANNOTATE_REDUCE_AFTER(addr)
++#define ANNOTATE_REDUCE_BEFORE(addr)
++#endif
++
++#define ANNOTATE_QUEUING
++#define ANNOTATE_TICKET
++#define ANNOTATE_FUTEX
++#define ANNOTATE_TAS
++#define ANNOTATE_DRDPA
++
++#ifdef ANNOTATE_QUEUING
++#define ANNOTATE_QUEUING_CREATE(lck)
++#define ANNOTATE_QUEUING_RELEASED(lck) ANNOTATE_HAPPENS_BEFORE(lck)
++#define ANNOTATE_QUEUING_ACQUIRED(lck) ANNOTATE_HAPPENS_AFTER(lck)
++#else
++#define ANNOTATE_QUEUING_CREATE(lck)
++#define ANNOTATE_QUEUING_RELEASED(lck)
++#define ANNOTATE_QUEUING_ACQUIRED(lck)
++#endif
++
++#ifdef ANNOTATE_TICKET
++#define ANNOTATE_TICKET_CREATE(lck)
++#define ANNOTATE_TICKET_RELEASED(lck) ANNOTATE_HAPPENS_BEFORE(lck)
++#define ANNOTATE_TICKET_ACQUIRED(lck) ANNOTATE_HAPPENS_AFTER(lck)
++#else
++#define ANNOTATE_TICKET_CREATE(lck)
++#define ANNOTATE_TICKET_RELEASED(lck)
++#define ANNOTATE_TICKET_ACQUIRED(lck)
++#endif
++
++#ifdef ANNOTATE_FUTEX
++#define ANNOTATE_FUTEX_CREATE(lck)
++#define ANNOTATE_FUTEX_RELEASED(lck) ANNOTATE_HAPPENS_BEFORE(lck)
++#define ANNOTATE_FUTEX_ACQUIRED(lck) ANNOTATE_HAPPENS_AFTER(lck)
++#else
++#define ANNOTATE_FUTEX_CREATE(lck)
++#define ANNOTATE_FUTEX_RELEASED(lck)
++#define ANNOTATE_FUTEX_ACQUIRED(lck)
++#endif
++
++#ifdef ANNOTATE_TAS
++#define ANNOTATE_TAS_CREATE(lck)
++#define ANNOTATE_TAS_RELEASED(lck) ANNOTATE_HAPPENS_BEFORE(lck)
++#define ANNOTATE_TAS_ACQUIRED(lck) ANNOTATE_HAPPENS_AFTER(lck)
++#else
++#define ANNOTATE_TAS_CREATE(lck)
++#define ANNOTATE_TAS_RELEASED(lck)
++#define ANNOTATE_TAS_ACQUIRED(lck)
++#endif
++
++#ifdef ANNOTATE_DRDPA
++#define ANNOTATE_DRDPA_CREATE(lck)
++#define ANNOTATE_DRDPA_RELEASED(lck) ANNOTATE_HAPPENS_BEFORE(lck)
++#define ANNOTATE_DRDPA_ACQUIRED(lck) ANNOTATE_HAPPENS_AFTER(lck)
++#else
++#define ANNOTATE_DRDPA_CREATE(lck)
++#define ANNOTATE_DRDPA_RELEASED(lck)
++#define ANNOTATE_DRDPA_ACQUIRED(lck)
++#endif
++
++#endif
+diff --git a/runtime/src/z_Linux_util.c b/runtime/src/z_Linux_util.c
+index 6c51301..b3c3e80 100644
+--- a/runtime/src/z_Linux_util.c
++++ b/runtime/src/z_Linux_util.c
+@@ -59,6 +59,8 @@
+ #include <ctype.h>
+ #include <fcntl.h>
+ 
++#include "tsan_annotations.h"
++
+ /* ------------------------------------------------------------------------ */
+ /* ------------------------------------------------------------------------ */
+ 
+@@ -1609,6 +1611,7 @@ __kmp_suspend_initialize( void )
+ static void
+ __kmp_suspend_initialize_thread( kmp_info_t *th )
+ {
++    ANNOTATE_HAPPENS_AFTER(&th->th.th_suspend_init_count);
+     if ( th->th.th_suspend_init_count <= __kmp_fork_count ) {
+         /* this means we haven't initialized the suspension pthread objects for this thread
+            in this instance of the process */
+@@ -1618,6 +1621,7 @@ __kmp_suspend_initialize_thread( kmp_info_t *th )
+         status = pthread_mutex_init( &th->th.th_suspend_mx.m_mutex, & __kmp_suspend_mutex_attr );
+         KMP_CHECK_SYSFAIL( "pthread_mutex_init", status );
+         *(volatile int*)&th->th.th_suspend_init_count = __kmp_fork_count + 1;
++        ANNOTATE_HAPPENS_BEFORE(&th->th.th_suspend_init_count);
+     };
+ }
+ 
+-- 
+2.7.3
+

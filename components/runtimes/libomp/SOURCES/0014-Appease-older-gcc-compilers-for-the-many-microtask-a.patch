@@ -1,0 +1,39 @@
+From bd0745e696beaf7ec5d42cc7d980c20408d67c84 Mon Sep 17 00:00:00 2001
+From: Jonathan Peyton <jonathan.l.peyton@intel.com>
+Date: Tue, 30 Aug 2016 19:28:58 +0000
+Subject: [PATCH 14/55] Appease older gcc compilers for the
+ many-microtask-args.c test
+
+Older gcc compilers error out with the C99 syntax of: for (int i =...)
+so this change just moves the int i; declaration up above.
+
+
+git-svn-id: https://llvm.org/svn/llvm-project/openmp/trunk@280138 91177308-0d34-0410-b5e6-96231b3b80d8
+---
+ runtime/test/misc_bugs/many-microtask-args.c | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/runtime/test/misc_bugs/many-microtask-args.c b/runtime/test/misc_bugs/many-microtask-args.c
+index a354872..d644515 100644
+--- a/runtime/test/misc_bugs/many-microtask-args.c
++++ b/runtime/test/misc_bugs/many-microtask-args.c
+@@ -4,6 +4,7 @@
+ int main()
+ {
+ 
++  int i;
+   int i1 = 0;
+   int i2 = 1;
+   int i3 = 2;
+@@ -23,7 +24,7 @@ int main()
+  
+   int r = 0; 
+   #pragma omp parallel for firstprivate(i1, i2, i3, i4, i5, i6, i7, i8, i9, i10, i11, i12, i13, i14, i15, i16) reduction(+:r)
+-  for (int i = 0; i < i16; i++) {
++  for (i = 0; i < i16; i++) {
+     r += i + i1 + i2 + i3 + i4 + i5 + i6 + i7 + i8 + i9 + i10 + i11 + i12 + i13 + i14 + i15 + i16;
+   }
+ 
+-- 
+2.7.3
+

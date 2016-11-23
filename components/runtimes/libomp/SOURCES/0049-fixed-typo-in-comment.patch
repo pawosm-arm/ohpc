@@ -1,0 +1,24 @@
+From 1d64a304cab5f4ddbafc1a2b6fea6ddd285c2c48 Mon Sep 17 00:00:00 2001
+From: Andrey Churbanov <Andrey.Churbanov@intel.com>
+Date: Thu, 3 Nov 2016 17:48:46 +0000
+Subject: [PATCH 49/55] fixed typo in comment
+
+git-svn-id: https://llvm.org/svn/llvm-project/openmp/trunk@285947 91177308-0d34-0410-b5e6-96231b3b80d8
+---
+ runtime/src/kmp_alloc.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/runtime/src/kmp_alloc.c b/runtime/src/kmp_alloc.c
+index 674c431..f3665ec 100644
+--- a/runtime/src/kmp_alloc.c
++++ b/runtime/src/kmp_alloc.c
+@@ -1,5 +1,5 @@
+ /*
+- * kmp_alloc.c -- private/shared dyanmic memory allocation and management
++ * kmp_alloc.c -- private/shared dynamic memory allocation and management
+  */
+ 
+ 
+-- 
+2.7.3
+

@@ -1,0 +1,25 @@
+From 7ca47d5c846d6d152b4c35589604f452ccd634e3 Mon Sep 17 00:00:00 2001
+From: Jonathan Peyton <jonathan.l.peyton@intel.com>
+Date: Mon, 21 Nov 2016 16:24:59 +0000
+Subject: [PATCH 55/55] Set task->td_dephash to NULL after free
+
+git-svn-id: https://llvm.org/svn/llvm-project/openmp/trunk@287552 91177308-0d34-0410-b5e6-96231b3b80d8
+---
+ runtime/src/kmp_taskdeps.cpp | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/runtime/src/kmp_taskdeps.cpp b/runtime/src/kmp_taskdeps.cpp
+index 8dda556..2c3da45 100644
+--- a/runtime/src/kmp_taskdeps.cpp
++++ b/runtime/src/kmp_taskdeps.cpp
+@@ -378,6 +378,7 @@ __kmp_release_deps ( kmp_int32 gtid, kmp_taskdata_t *task )
+     if ( task->td_dephash ) {
+         KA_TRACE(40, ("__kmp_release_deps: T#%d freeing dependencies hash of task %p.\n", gtid, task ) );
+         __kmp_dephash_free(thread,task->td_dephash);
++        task->td_dephash = NULL;
+     }
+ 
+     if ( !node ) return;
+-- 
+2.7.3
+

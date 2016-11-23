@@ -1,0 +1,104 @@
+From 754a33e6a1b694e7a345c61086ea39de86028d25 Mon Sep 17 00:00:00 2001
+From: Jonathan Peyton <jonathan.l.peyton@intel.com>
+Date: Wed, 26 Oct 2016 21:42:48 +0000
+Subject: [PATCH 43/55] Use getpagesize() instead of PAGE_SIZE macro when
+ KMP_OS_LINUX is true
+
+Patch by Victor Campos
+
+Differential Revision: https://reviews.llvm.org/D26001
+
+
+git-svn-id: https://llvm.org/svn/llvm-project/openmp/trunk@285243 91177308-0d34-0410-b5e6-96231b3b80d8
+---
+ runtime/src/kmp_alloc.c   |  9 ++-------
+ runtime/src/kmp_os.h      | 13 +++++++++++--
+ runtime/src/kmp_runtime.c | 12 +++++++-----
+ 3 files changed, 20 insertions(+), 14 deletions(-)
+
+diff --git a/runtime/src/kmp_alloc.c b/runtime/src/kmp_alloc.c
+index af3f1db..674c431 100644
+--- a/runtime/src/kmp_alloc.c
++++ b/runtime/src/kmp_alloc.c
+@@ -1719,13 +1719,8 @@ void *
+ __kmp_ft_page_allocate(size_t size)
+ {
+   void *adr, *aadr;
+-#if KMP_OS_LINUX
+-  /* TODO: Use this function to get page size everywhere */
+-  int page_size = getpagesize();
+-#else
+-  /* TODO: Find windows function to get page size and use it everywhere */
+-  int page_size = PAGE_SIZE;
+-#endif /* KMP_OS_LINUX */
++
++  const int page_size = KMP_GET_PAGE_SIZE();
+ 
+   adr = (void *) __kmp_thread_malloc( __kmp_get_thread(),
+                                     size + page_size + KMP_PTR_SKIP);
+diff --git a/runtime/src/kmp_os.h b/runtime/src/kmp_os.h
+index 3335214..65382db 100644
+--- a/runtime/src/kmp_os.h
++++ b/runtime/src/kmp_os.h
+@@ -236,9 +236,18 @@ typedef double  kmp_real64;
+ #endif
+ 
+ #define PAGE_SIZE                       (0x4000)
++
++#if KMP_OS_LINUX
++#define KMP_GET_PAGE_SIZE() getpagesize()
++#else
++// TODO: find the corresponding function to getpagesize() in Windows
++// and use it whenever possible.
++#define KMP_GET_PAGE_SIZE() PAGE_SIZE
++#endif
++
+ #define PAGE_ALIGNED(_addr)     ( ! ((size_t) _addr & \
+-                                     (size_t)(PAGE_SIZE - 1)))
+-#define ALIGN_TO_PAGE(x)   (void *)(((size_t)(x)) & ~((size_t)(PAGE_SIZE - 1)))
++                                     (size_t)(KMP_GET_PAGE_SIZE() - 1)))
++#define ALIGN_TO_PAGE(x)   (void *)(((size_t)(x)) & ~((size_t)(KMP_GET_PAGE_SIZE() - 1)))
+ 
+ /* ---------------------- Support for cache alignment, padding, etc. -----------------*/
+ 
+diff --git a/runtime/src/kmp_runtime.c b/runtime/src/kmp_runtime.c
+index 240d1f3..b60bd0b 100644
+--- a/runtime/src/kmp_runtime.c
++++ b/runtime/src/kmp_runtime.c
+@@ -347,8 +347,10 @@ __kmp_print_storage_map_gtid( int gtid, void *p1, void *p2, size_t size, char co
+                     int lastNode;
+                     int localProc = __kmp_get_cpu_from_gtid(gtid);
+ 
+-                    p1 = (void *)( (size_t)p1 & ~((size_t)PAGE_SIZE - 1) );
+-                    p2 = (void *)( ((size_t) p2 - 1) & ~((size_t)PAGE_SIZE - 1) );
++                    const int page_size = KMP_GET_PAGE_SIZE();
++
++                    p1 = (void *)( (size_t)p1 & ~((size_t)page_size - 1) );
++                    p2 = (void *)( ((size_t) p2 - 1) & ~((size_t)page_size - 1) );
+                     if(localProc >= 0)
+                         __kmp_printf_no_lock("  GTID %d localNode %d\n", gtid, localProc>>1);
+                     else
+@@ -360,17 +362,17 @@ __kmp_print_storage_map_gtid( int gtid, void *p1, void *p2, size_t size, char co
+                         lastNode = node;
+                         /* This loop collates adjacent pages with the same host node. */
+                         do {
+-                            (char*)p1 += PAGE_SIZE;
++                            (char*)p1 += page_size;
+                         } while(p1 <= p2 && (node = __kmp_get_host_node(p1)) == lastNode);
+                         __kmp_printf_no_lock("    %p-%p memNode %d\n", last,
+                                              (char*)p1 - 1, lastNode);
+                     } while(p1 <= p2);
+ # else
+                     __kmp_printf_no_lock("    %p-%p memNode %d\n", p1,
+-                                         (char*)p1 + (PAGE_SIZE - 1), __kmp_get_host_node(p1));
++                                         (char*)p1 + (page_size - 1), __kmp_get_host_node(p1));
+                     if(p1 < p2)  {
+                         __kmp_printf_no_lock("    %p-%p memNode %d\n", p2,
+-                                             (char*)p2 + (PAGE_SIZE - 1), __kmp_get_host_node(p2));
++                                             (char*)p2 + (page_size - 1), __kmp_get_host_node(p2));
+                     }
+ # endif
+                 }
+-- 
+2.7.3
+

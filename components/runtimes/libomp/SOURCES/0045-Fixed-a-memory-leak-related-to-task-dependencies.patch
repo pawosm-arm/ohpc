@@ -1,0 +1,189 @@
+From 72db09bb15065754e717db5678ab128848121361 Mon Sep 17 00:00:00 2001
+From: Andrey Churbanov <Andrey.Churbanov@intel.com>
+Date: Thu, 27 Oct 2016 11:43:07 +0000
+Subject: [PATCH 45/55] Fixed a memory leak related to task dependencies.
+
+Differential Revision: http://reviews.llvm.org/D25504
+
+Patch by Alex Duran.
+
+
+git-svn-id: https://llvm.org/svn/llvm-project/openmp/trunk@285283 91177308-0d34-0410-b5e6-96231b3b80d8
+---
+ runtime/src/kmp.h            | 20 ++++++++++++++------
+ runtime/src/kmp_runtime.c    |  3 +++
+ runtime/src/kmp_taskdeps.cpp | 20 ++++++++++++++------
+ runtime/src/kmp_tasking.c    | 35 ++++++++++++++++++++++++++++++++++-
+ 4 files changed, 65 insertions(+), 13 deletions(-)
+
+diff --git a/runtime/src/kmp.h b/runtime/src/kmp.h
+index 6766fd5..f4b3965 100644
+--- a/runtime/src/kmp.h
++++ b/runtime/src/kmp.h
+@@ -3373,6 +3373,8 @@ extern kmp_task_t* __kmp_task_alloc( ident_t *loc_ref, kmp_int32 gtid,
+   kmp_routine_entry_t task_entry );
+ extern void __kmp_init_implicit_task( ident_t *loc_ref, kmp_info_t *this_thr,
+                   kmp_team_t *team, int tid, int set_curr_task );
++extern void __kmp_finish_implicit_task(kmp_info_t *this_thr);
++extern void __kmp_free_implicit_task(kmp_info_t *this_thr);
+ 
+ int __kmp_execute_tasks_32(kmp_info_t *thread, kmp_int32 gtid, kmp_flag_32 *flag, int final_spin,
+                            int *thread_finished,
+@@ -3542,12 +3544,18 @@ void __kmpc_omp_task_complete( ident_t *loc_ref, kmp_int32 gtid, kmp_task_t *tas
+ KMP_EXPORT void __kmpc_taskgroup( ident_t * loc, int gtid );
+ KMP_EXPORT void __kmpc_end_taskgroup( ident_t * loc, int gtid );
+ 
+-KMP_EXPORT kmp_int32 __kmpc_omp_task_with_deps ( ident_t *loc_ref, kmp_int32 gtid, kmp_task_t * new_task,
+-                                                 kmp_int32 ndeps, kmp_depend_info_t *dep_list,
+-                                                 kmp_int32 ndeps_noalias, kmp_depend_info_t *noalias_dep_list );
+-KMP_EXPORT void __kmpc_omp_wait_deps ( ident_t *loc_ref, kmp_int32 gtid, kmp_int32 ndeps, kmp_depend_info_t *dep_list,
+-                                          kmp_int32 ndeps_noalias, kmp_depend_info_t *noalias_dep_list );
+-extern void __kmp_release_deps ( kmp_int32 gtid, kmp_taskdata_t *task );
++KMP_EXPORT kmp_int32 __kmpc_omp_task_with_deps(
++    ident_t *loc_ref, kmp_int32 gtid, kmp_task_t *new_task, kmp_int32 ndeps,
++    kmp_depend_info_t *dep_list, kmp_int32 ndeps_noalias,
++    kmp_depend_info_t *noalias_dep_list);
++KMP_EXPORT void __kmpc_omp_wait_deps(ident_t *loc_ref, kmp_int32 gtid,
++                                     kmp_int32 ndeps,
++                                     kmp_depend_info_t *dep_list,
++                                     kmp_int32 ndeps_noalias,
++                                     kmp_depend_info_t *noalias_dep_list);
++extern void __kmp_release_deps(kmp_int32 gtid, kmp_taskdata_t *task);
++extern void __kmp_dephash_free_entries(kmp_info_t *thread, kmp_dephash_t *h);
++extern void __kmp_dephash_free(kmp_info_t *thread, kmp_dephash_t *h);
+ 
+ extern kmp_int32 __kmp_omp_task( kmp_int32 gtid, kmp_task_t * new_task, bool serialize_immediate );
+ 
+diff --git a/runtime/src/kmp_runtime.c b/runtime/src/kmp_runtime.c
+index b60bd0b..bab59cb 100644
+--- a/runtime/src/kmp_runtime.c
++++ b/runtime/src/kmp_runtime.c
+@@ -5756,6 +5756,7 @@ __kmp_reap_thread(
+     }; // if
+ #endif /* KMP_AFFINITY_SUPPORTED */
+ 
++    __kmp_free_implicit_task(thread);
+     __kmp_reap_team( thread->th.th_serial_team );
+     thread->th.th_serial_team = NULL;
+     __kmp_free( thread );
+@@ -6804,6 +6805,8 @@ __kmp_run_after_invoked_task( int gtid, int tid, kmp_info_t *this_thr,
+ {
+     if( __kmp_env_consistency_check )
+         __kmp_pop_parallel( gtid, team->t.t_ident );
++
++    __kmp_finish_implicit_task(this_thr);
+ }
+ 
+ int
+diff --git a/runtime/src/kmp_taskdeps.cpp b/runtime/src/kmp_taskdeps.cpp
+index 7e60ce8..8dda556 100644
+--- a/runtime/src/kmp_taskdeps.cpp
++++ b/runtime/src/kmp_taskdeps.cpp
+@@ -97,7 +97,8 @@ __kmp_dephash_create ( kmp_info_t *thread, kmp_taskdata_t *current_task )
+     else
+         h_size = KMP_DEPHASH_OTHER_SIZE;
+ 
+-    kmp_int32 size = h_size * sizeof(kmp_dephash_entry_t) + sizeof(kmp_dephash_t);
++    kmp_int32 size =
++        h_size * sizeof(kmp_dephash_entry_t *) + sizeof(kmp_dephash_t);
+ 
+ #if USE_FAST_MEMORY
+     h = (kmp_dephash_t *) __kmp_fast_allocate( thread, size );
+@@ -118,13 +119,13 @@ __kmp_dephash_create ( kmp_info_t *thread, kmp_taskdata_t *current_task )
+     return h;
+ }
+ 
+-static void
+-__kmp_dephash_free ( kmp_info_t *thread, kmp_dephash_t *h )
++void
++__kmp_dephash_free_entries(kmp_info_t *thread, kmp_dephash_t *h)
+ {
+-    for ( size_t i=0; i < h->size; i++ ) {
+-        if ( h->buckets[i] ) {
++    for (size_t i = 0; i < h->size; i++) {
++        if (h->buckets[i]) {
+             kmp_dephash_entry_t *next;
+-            for ( kmp_dephash_entry_t *entry = h->buckets[i]; entry; entry = next ) {
++            for (kmp_dephash_entry_t *entry = h->buckets[i]; entry; entry = next) {
+                 next = entry->next_in_bucket;
+                 __kmp_depnode_list_free(thread,entry->last_ins);
+                 __kmp_node_deref(thread,entry->last_out);
+@@ -134,8 +135,15 @@ __kmp_dephash_free ( kmp_info_t *thread, kmp_dephash_t *h )
+                 __kmp_thread_free(thread,entry);
+ #endif
+             }
++            h->buckets[i] = 0;
+         }
+     }
++}
++
++void
++__kmp_dephash_free(kmp_info_t *thread, kmp_dephash_t *h)
++{
++    __kmp_dephash_free_entries(thread, h);
+ #if USE_FAST_MEMORY
+     __kmp_fast_free(thread,h);
+ #else
+diff --git a/runtime/src/kmp_tasking.c b/runtime/src/kmp_tasking.c
+index 60efc1d..888a3f3 100644
+--- a/runtime/src/kmp_tasking.c
++++ b/runtime/src/kmp_tasking.c
+@@ -865,7 +865,6 @@ __kmp_init_implicit_task( ident_t *loc_ref, kmp_info_t *this_thr, kmp_team_t *te
+     task->td_flags.freed       = 0;
+ 
+ #if OMP_40_ENABLED
+-    task->td_dephash = NULL;
+     task->td_depnode = NULL;
+ #endif
+ 
+@@ -874,6 +873,7 @@ __kmp_init_implicit_task( ident_t *loc_ref, kmp_info_t *this_thr, kmp_team_t *te
+         task->td_allocated_child_tasks  = 0; // Not used because do not need to deallocate implicit task
+ #if OMP_40_ENABLED
+         task->td_taskgroup = NULL;           // An implicit task does not have taskgroup
++        task->td_dephash = NULL;
+ #endif
+         __kmp_push_current_task_to_thread( this_thr, team, tid );
+     } else {
+@@ -889,6 +889,39 @@ __kmp_init_implicit_task( ident_t *loc_ref, kmp_info_t *this_thr, kmp_team_t *te
+                   tid, team, task ) );
+ }
+ 
++
++//-----------------------------------------------------------------------------
++//// __kmp_finish_implicit_task: Release resources associated to implicit tasks
++//// at the end of parallel regions. Some resources are kept for reuse in the
++//// next parallel region.
++////
++//// thread:  thread data structure corresponding to implicit task
++//
++void
++__kmp_finish_implicit_task(kmp_info_t *thread)
++{
++    kmp_taskdata_t *task = thread->th.th_current_task;
++    if (task->td_dephash)
++        __kmp_dephash_free_entries(thread, task->td_dephash);
++}
++
++
++//-----------------------------------------------------------------------------
++//// __kmp_free_implicit_task: Release resources associated to implicit tasks
++//// when these are destroyed regions
++////
++//// thread:  thread data structure corresponding to implicit task
++//
++void
++__kmp_free_implicit_task(kmp_info_t *thread)
++{
++    kmp_taskdata_t *task = thread->th.th_current_task;
++    if (task->td_dephash)
++        __kmp_dephash_free(thread, task->td_dephash);
++    task->td_dephash = NULL;
++}
++
++
+ // Round up a size to a power of two specified by val
+ // Used to insert padding between structures co-allocated using a single malloc() call
+ static size_t
+-- 
+2.7.3
+

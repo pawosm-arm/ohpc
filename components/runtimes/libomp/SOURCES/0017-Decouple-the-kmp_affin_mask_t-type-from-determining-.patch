@@ -1,0 +1,50 @@
+From dbb582e3a81182d683f152dcb0b7c20ba53140a0 Mon Sep 17 00:00:00 2001
+From: Jonathan Peyton <jonathan.l.peyton@intel.com>
+Date: Fri, 2 Sep 2016 20:35:47 +0000
+Subject: [PATCH 17/55] Decouple the kmp_affin_mask_t type from determining if
+ affinity is capable
+
+the __kmp_affinity_determine_capable() functions are highly operating system
+specific.  This change has the functions use the type they expect explicitly.
+
+
+git-svn-id: https://llvm.org/svn/llvm-project/openmp/trunk@280538 91177308-0d34-0410-b5e6-96231b3b80d8
+---
+ runtime/src/z_Linux_util.c      | 4 ++--
+ runtime/src/z_Windows_NT_util.c | 4 ++--
+ 2 files changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/runtime/src/z_Linux_util.c b/runtime/src/z_Linux_util.c
+index 5f42d72..578159b 100644
+--- a/runtime/src/z_Linux_util.c
++++ b/runtime/src/z_Linux_util.c
+@@ -251,8 +251,8 @@ __kmp_affinity_determine_capable(const char *env_var)
+ 
+     int gCode;
+     int sCode;
+-    kmp_affin_mask_t *buf;
+-    buf = ( kmp_affin_mask_t * ) KMP_INTERNAL_MALLOC( KMP_CPU_SET_SIZE_LIMIT );
++    unsigned char *buf;
++    buf = ( unsigned char * ) KMP_INTERNAL_MALLOC( KMP_CPU_SET_SIZE_LIMIT );
+ 
+     // If Linux* OS:
+     // If the syscall fails or returns a suggestion for the size,
+diff --git a/runtime/src/z_Windows_NT_util.c b/runtime/src/z_Windows_NT_util.c
+index f3ae0a4..26f91d1 100644
+--- a/runtime/src/z_Windows_NT_util.c
++++ b/runtime/src/z_Windows_NT_util.c
+@@ -807,9 +807,9 @@ __kmp_affinity_determine_capable( const char *env_var )
+     //
+ 
+ #if KMP_GROUP_AFFINITY
+-    KMP_AFFINITY_ENABLE(__kmp_num_proc_groups*sizeof(kmp_affin_mask_t));
++    KMP_AFFINITY_ENABLE(__kmp_num_proc_groups*sizeof(DWORD_PTR));
+ #else
+-    KMP_AFFINITY_ENABLE(sizeof(kmp_affin_mask_t));
++    KMP_AFFINITY_ENABLE(sizeof(DWORD_PTR));
+ #endif
+ 
+     KA_TRACE( 10, (
+-- 
+2.7.3
+

@@ -1,0 +1,31 @@
+From 27bfdc4a3c9ac41876fc10e423ce415b72ddf2a6 Mon Sep 17 00:00:00 2001
+From: Michal Gorny <mgorny@gentoo.org>
+Date: Fri, 30 Sep 2016 16:56:16 +0000
+Subject: [PATCH 33/55] [test] Support 'lit' executable name
+
+Support finding lit as plain 'lit', which is the name used by setup.py
+in LLVM's utils/lit.
+
+Differential Revision: https://reviews.llvm.org/D25072
+
+git-svn-id: https://llvm.org/svn/llvm-project/openmp/trunk@282876 91177308-0d34-0410-b5e6-96231b3b80d8
+---
+ runtime/test/CMakeLists.txt | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/runtime/test/CMakeLists.txt b/runtime/test/CMakeLists.txt
+index 6c31a03..8162855 100644
+--- a/runtime/test/CMakeLists.txt
++++ b/runtime/test/CMakeLists.txt
+@@ -41,7 +41,7 @@ if(${LIBOMP_STANDALONE_BUILD})
+   set(LIBOMP_TEST_OPENMP_FLAG -fopenmp CACHE STRING
+     "OpenMP compiler flag to use for testing OpenMP library")
+   find_program(LIBOMP_LLVM_LIT_EXECUTABLE
+-    NAMES llvm-lit lit.py
++    NAMES llvm-lit lit.py lit
+     PATHS ${OPENMP_LLVM_TOOLS_DIR})
+   if(NOT LIBOMP_LLVM_LIT_EXECUTABLE)
+     libomp_say("Cannot find llvm-lit.")
+-- 
+2.7.3
+

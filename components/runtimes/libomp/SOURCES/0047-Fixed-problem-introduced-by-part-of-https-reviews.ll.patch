@@ -1,0 +1,37 @@
+From bbdd8b334b2c813523adbd60f166d22f549d49de Mon Sep 17 00:00:00 2001
+From: Andrey Churbanov <Andrey.Churbanov@intel.com>
+Date: Tue, 1 Nov 2016 16:19:04 +0000
+Subject: [PATCH 47/55] Fixed problem introduced by part of
+ https://reviews.llvm.org/D21196.
+
+Check Task Scheduling Constraint (TSC) on stealing of untied task.
+This is needed because the untied task can produce tied children
+those can break TSC if untied is not a descendant of current task.
+This can cause live lock on complex tyasking tests
+(e.g. kastors/strassen-task-dep).
+
+Differential Revision: https://reviews.llvm.org/D26182
+
+git-svn-id: https://llvm.org/svn/llvm-project/openmp/trunk@285703 91177308-0d34-0410-b5e6-96231b3b80d8
+---
+ runtime/src/kmp_tasking.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/runtime/src/kmp_tasking.c b/runtime/src/kmp_tasking.c
+index d3fcba8..e007917 100644
+--- a/runtime/src/kmp_tasking.c
++++ b/runtime/src/kmp_tasking.c
+@@ -1801,8 +1801,8 @@ __kmp_steal_task( kmp_info_t *victim, kmp_int32 gtid, kmp_task_team_t *task_team
+             parent = parent->td_parent;  // check generation up to the level of the current task
+             KMP_DEBUG_ASSERT(parent != NULL);
+         }
+-        if ( parent != current && (taskdata->td_flags.tiedness == TASK_TIED) ) { // untied is always allowed to be stolen
+-            // If the tail task is not a child, then no other childs can appear in the deque (?).
++        if ( parent != current ) {
++            // If the tail task is not a descendant of the current task then do not steal it.
+             __kmp_release_bootstrap_lock( & victim_td -> td.td_deque_lock );
+             KA_TRACE(10, ("__kmp_steal_task(exit #2): T#%d could not steal from T#%d: task_team=%p "
+                           "ntasks=%d head=%u tail=%u\n",
+-- 
+2.7.3
+
