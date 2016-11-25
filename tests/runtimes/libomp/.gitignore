@@ -1,0 +1,12 @@
+*.o
+*.trs
+*.log
+*.out
+config.h
+config.h.in
+configure
+Makefile
+Makefile.in
+aclocal.m4
+autom4te.cache
+core*

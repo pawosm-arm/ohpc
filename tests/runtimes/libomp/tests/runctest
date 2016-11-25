@@ -1,0 +1,6 @@
+#!/bin/bash
+
+testlink=`basename $0`
+testname=${testlink%.*}
+
+./runtest.pl --lang=c testlist-c.txt --test="$testname" 2>&1 | exit `grep -m 1 -c failed`

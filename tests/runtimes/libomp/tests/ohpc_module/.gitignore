@@ -1,0 +1,7 @@
+.cmd_output
+*.o
+*.trs
+*.log
+*.out
+Makefile
+Makefile.in

@@ -1,0 +1,6 @@
+#!/bin/bash
+
+testlink=`basename $0`
+testname=${testlink%.*}
+
+./runtest.pl --lang=fortran testlist-f.txt --test="$testname" 2>&1 | exit `grep -m 1 -c failed`

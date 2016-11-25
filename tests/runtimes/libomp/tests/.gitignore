@@ -1,0 +1,12 @@
+.cmd_output
+*.o
+*.trs
+*.log
+*.out
+*.ctest
+*.ftest
+bin
+Makefile
+Makefile.in
+results.txt
+core*

@@ -202,6 +202,12 @@ AC_ARG_ENABLE([hypre],
    [AX_OPTION_DEFAULT(type=long,enable_hypre,yes)])
 AM_CONDITIONAL(HYPRE_ENABLED,test "x$enable_hypre" = "xyes" ) 
 #------------------------------------------------------------------------------------------
+# LIBOMP
+AC_ARG_ENABLE([libomp],
+   [AS_HELP_STRING([--enable-libomp],[Enable LIBOMP tests (default=yes)])],[],
+   [AX_OPTION_DEFAULT(type=long,enable_libomp,yes)])
+AM_CONDITIONAL(LIBOMP_ENABLED,test "x$enable_libomp" = "xyes" )
+#------------------------------------------------------------------------------------------
 # MODULES
 AC_ARG_ENABLE([modules],
    [AS_HELP_STRING([--enable-modules],[Enable Module tests (default=yes)])],[],
@@ -582,6 +588,12 @@ echo    Libraries:
        echo '    'IMB....................... : enabled
     else
        echo '    'IMB....................... : disabled
+    fi
+
+    if test "x$enable_libomp" = "xyes"; then
+       echo '    'LIBOMP.................... : enabled
+    else
+       echo '    'LIBOMP.................... : disabled
     fi
 
     if test "x$enable_metis" = "xyes"; then
