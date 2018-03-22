@@ -67,7 +67,11 @@ Buildrequires: rdma-core-devel
 Requires: prun%{PROJ_DELIM}
 
 BuildRequires: bison
-BuildRequires: libibmad-devel 
+BuildRequires: libibmad-devel
+%if 0%{?sles_version} || 0%{?suse_version}
+BuildRequires: libibverbs-devel
+BuildRequires: librdmacm-devel
+%endif
 
 # Default library install path
 %define install_path %{OHPC_MPI_STACKS}/%{pname}-%{compiler_family}/%version
