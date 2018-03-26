@@ -42,15 +42,6 @@ Provides OpenHPC-style module compatability for use with the Arm HPC compiler su
 
 %prep
 
-%build
-
-%install
-
-%{__mkdir} -p %{buildroot}/%{OHPC_MODULES}/arm
-
-
-%pre
-
 # Verify Arm HPC compilers are installed. Punt if not detected.
 
 arm_subpath="aarch64-linux/bin/armclang$"
@@ -88,7 +79,11 @@ if [ -z "${versions}" ]; then
     exit 1
 fi
 
-%post
+%build
+
+%install
+
+%{__mkdir_p} %{buildroot}/%{OHPC_MODULES}/arm
 
 arm_subpath="aarch64-linux/bin/armclang$"
 packages=`rpm -qal | grep ${arm_subpath}`
@@ -126,7 +121,7 @@ else
 fi
 
 # Module header
-%{__cat} << EOF > %{OHPC_MODULES}/arm/compat
+%{__cat} << EOF > %{buildroot}/%{OHPC_MODULES}/arm/compat
 #%Module1.0#####################################################################
 
 proc ModulesHelp { } {
@@ -152,11 +147,10 @@ depends-on      \$ARM_GENERIC
 family "compiler"
 EOF
 
-
 %postun
 
 if [ -s %{OHPC_MODULES}/arm/compat ];then
-    rm -f %{OHPC_MODULES}/arm/compat 
+    rm -f %{OHPC_MODULES}/arm/compat
 fi
 
 %clean
